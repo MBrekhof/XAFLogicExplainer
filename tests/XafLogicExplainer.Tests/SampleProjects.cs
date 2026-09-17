@@ -93,6 +93,10 @@ internal static class SampleProjects
     public static string CompileRemovePath =>
         Path.Combine(FixturesRoot, "CompileRemoveSolution", "Archive.Module");
 
+    /// <summary>Path to the module whose classes each have a second partial that adds an interface.</summary>
+    public static string PartialLayoutPath =>
+        Path.Combine(FixturesRoot, "PartialLayoutSolution", "Driving.Module");
+
     /// <summary>Path to the module with a pre-SDK project file beside the SDK one that replaced it.</summary>
     public static string MigratedProjectPath =>
         Path.Combine(FixturesRoot, "MigratedProjectSolution", "Ledger.Module");
@@ -186,6 +190,7 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyBuiltInBases = new(() => Extract(BuiltInBasesPath));
     private static readonly Lazy<ExtractedProject> LazySharedClassName = new(() => Extract(SharedClassNamePath));
     private static readonly Lazy<ExtractedProject> LazyCompileRemove = new(() => Extract(CompileRemovePath));
+    private static readonly Lazy<ExtractedProject> LazyPartialLayout = new(() => Extract(PartialLayoutPath));
     private static readonly Lazy<ExtractedProject> LazyMigratedProject = new(() => Extract(MigratedProjectPath));
 
     /// <summary>The XPO sample: Customer, Order, OrderLine, one controller, seed data, xafml.</summary>
@@ -284,6 +289,12 @@ internal static class SampleProjects
     /// by pattern — beside a class removed only under a condition, which is still compiled.
     /// </summary>
     public static ExtractedProject CompileRemove => LazyCompileRemove.Value;
+
+    /// <summary>
+    /// A driving school whose classes are each split in two: the class on its base, and a partial
+    /// that only adds an interface for its screens.
+    /// </summary>
+    public static ExtractedProject PartialLayout => LazyPartialLayout.Value;
 
     /// <summary>
     /// A ledger application mid-migration: a folder-named pre-SDK project file that lists its sources

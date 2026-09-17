@@ -25,7 +25,8 @@ public class ExtractedEntity
     /// </summary>
     /// <remarks>
     /// With <see cref="FilePath"/> this is a citation: the place a reader goes to check the claim.
-    /// A partial class is cited at the declaration extraction saw first.
+    /// A partial class is cited at the part that names its base class, else the first part with a
+    /// base list, else the first seen.
     /// </remarks>
     public int Line { get; set; }
 
