@@ -7,6 +7,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A folder in the platform project was printed as a path on the machine that ran the extraction.**
+  `AGENTS.md` names the folders controllers live in, and the recipe for adding an action repeats them. A
+  controller in the platform project beside the module sits outside the module's folder, and its folder
+  fell through to the absolute path — in a file meant to be committed, next to citations of the same
+  controllers that were relative, and different on every machine that regenerated it. Folders are now
+  named the way citations name files: `Controllers/` in the module, `../App.Blazor.Server/Controllers/`
+  beside it, and not at all when they are in neither the project nor the solution. On two real
+  applications five of their seven controller folders were printed that way.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.
