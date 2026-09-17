@@ -40,6 +40,7 @@ public class PortableMarkdownTests
         ("Demo", SampleProjects.Demo),
         ("Walkthrough", SampleProjects.Walkthrough),
         ("Appearance", SampleProjects.Appearance),
+        ("Lifecycle", SampleProjects.Lifecycle),
     ];
 
     private static string Markdown(ExtractedProject project, string language) =>

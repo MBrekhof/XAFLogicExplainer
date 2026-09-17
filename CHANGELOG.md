@@ -7,6 +7,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **What a business class does when an object is created, loaded or saved.** XAF documents the class as
+  the place for that logic — `OnCreated`, `OnLoaded` and `OnSaving` in EF Core (overrides of `BaseObject`'s,
+  or an `IXafEntityObject` implementation), `AfterConstruction` and `OnSaving` in XPO — and none of it was
+  read, while `AGENTS.md` called its inventories complete. Each hook is now recorded with the properties it
+  assigns and where it is declared, and shown with the rules: in the business rules document under the class
+  that declared it, on each entity's page and in `xaf_rules` under every class it runs for, in `xaf_search`,
+  and on the explain page. A hook on a base reaches a descendant only when the descendant does not override
+  the method without calling `base`. What is assigned is listed, not when: a condition around an assignment
+  is not read, and an assignment inside a lambda or a local function is left out. Logic attached from outside
+  the class, such as a controller handling `ObjectSpace.Committing`, is not read, and `AGENTS.md` now says
+  that its completeness does not extend to it. On the largest of four real applications nine classes run
+  such a hook; the other three declare none.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.

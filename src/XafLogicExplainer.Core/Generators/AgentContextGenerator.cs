@@ -253,6 +253,10 @@ public sealed class AgentContextGenerator
         sb.AppendLine("action does not appear there, it does not exist in this application — say so plainly rather");
         sb.AppendLine("than assuming it lives in a file you have not opened. When a request needs something that");
         sb.AppendLine("is genuinely absent, the honest answer is that it must be created.");
+        sb.AppendLine("That completeness does not extend to what happens when an object is saved. Methods a business");
+        sb.AppendLine("class declares for it (`OnCreated`, `OnSaving`, `AfterConstruction`) are listed with the rules;");
+        sb.AppendLine("logic attached from outside the class, such as a controller handling `ObjectSpace.Committing`,");
+        sb.AppendLine("is not inventoried, so not finding it proves nothing.");
         sb.AppendLine();
 
         // Rule 3: local conventions beat tutorials.

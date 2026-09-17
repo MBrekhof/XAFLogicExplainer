@@ -82,6 +82,7 @@ public class DocumentationLabels
     public string Fields { get; init; } = "";
     public string ComputedPropertiesDerived { get; init; } = "";
     public string ExplicitBusinessRules { get; init; } = "";
+    public string LifecycleLogic { get; init; } = "";
     public string ClassLevel { get; init; } = "";
     public string When { get; init; } = "";
 
@@ -365,6 +366,7 @@ public class DocumentationLabels
         Fields = "campos",
         ComputedPropertiesDerived = "Propiedades Calculadas (Logica Derivada)",
         ExplicitBusinessRules = "Reglas de Negocio Explicitas",
+        LifecycleLogic = "Logica al Crear, Cargar y Guardar",
         ClassLevel = "clase",
         When = "cuando",
         Always = "siempre",
@@ -550,6 +552,7 @@ public class DocumentationLabels
         Fields = "fields",
         ComputedPropertiesDerived = "Computed Properties (Derived Logic)",
         ExplicitBusinessRules = "Explicit Business Rules",
+        LifecycleLogic = "Logic on Create, Load and Save",
         ClassLevel = "class",
         When = "when",
         Always = "always",
