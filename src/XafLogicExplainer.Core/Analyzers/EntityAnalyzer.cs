@@ -1452,12 +1452,10 @@ public class EntityAnalyzer : IEntityAnalyzer
             .Select(hook => hook.MethodName).ToHashSet(StringComparer.Ordinal);
         entity.Lifecycle.RemoveAll(own => own.InheritedFrom is null && own.IsOverride && restarted.Contains(own.MethodName));
 
-        foreach (var hook in parent.Lifecycle)
+        var inheritedHooks = parent.Lifecycle.Where(hook => hook.IsNewSlot || !entity.Lifecycle.Any(own =>
+            own.InheritedFrom is null && !own.IsNewSlot && own.Trigger == hook.Trigger && !own.CallsBase)).ToList();
+        foreach (var hook in inheritedHooks)
         {
-            if (!hook.IsNewSlot && entity.Lifecycle.Any(own =>
-                    own.InheritedFrom is null && !own.IsNewSlot && own.Trigger == hook.Trigger && !own.CallsBase))
-                continue;
-
             var copy = hook.Clone();
             if (copy.InheritedFrom is null)
             {
