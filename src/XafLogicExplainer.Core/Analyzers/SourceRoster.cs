@@ -145,13 +145,16 @@ public static class SourceRoster
     {
         var siblings = new List<string>();
 
-        var parentDir = Directory.GetParent(moduleDirectory)?.FullName;
+        // As typed, `C:/App/App.Module/` has App.Module as its "parent", and `C:/App/App.Module` never
+        // equals the `C:\App\App.Module` the directory listing returns: normalise before either.
+        var module = Path.TrimEndingDirectorySeparator(Path.GetFullPath(moduleDirectory));
+        var parentDir = Directory.GetParent(module)?.FullName;
         if (parentDir == null) return siblings;
 
         foreach (var siblingDir in Directory.GetDirectories(parentDir))
         {
             // Skip the module directory itself
-            if (siblingDir.Equals(moduleDirectory, StringComparison.OrdinalIgnoreCase))
+            if (siblingDir.Equals(module, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             // Skip common non-project directories
