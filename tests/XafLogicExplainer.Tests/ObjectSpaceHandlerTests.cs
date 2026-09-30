@@ -126,6 +126,18 @@ public class ObjectSpaceHandlerTests
     }
 
     [Fact]
+    public void AnActionsTargetIsNotTheControllers() =>
+        Assert.Empty(Assert.Single(P.Handlers("ActionTargetController")).ControllerTargets);
+
+    [Fact]
+    public void TheConstructorsTargetWinsOverTheGenericArgument() =>
+        Assert.Equal([$"{Ns}.Car"], Assert.Single(P.Handlers("CarOnlyController")).ControllerTargets);
+
+    [Fact]
+    public void AHandlerOnAPopupFirstStillCountsForTheControllersOwnSpace() =>
+        Assert.Contains(P.Handlers("ReusedHandlerController"), h => h.ControllerTargets.SequenceEqual([$"{Ns}.Order"]));
+
+    [Fact]
     public void AnInterfaceTargetIsKeptByName()
     {
         var handler = Assert.Single(P.Handlers("AuditController"));

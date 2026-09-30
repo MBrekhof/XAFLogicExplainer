@@ -63,9 +63,13 @@ public static class ObjectSpaceHandlerAnalyzer
         }
     }
 
-    /// <summary>A handler subscribed twice (unsubscribed around a save, say) is one handler; two lambdas are two.</summary>
+    /// <summary>
+    /// A handler subscribed twice alike (unsubscribed around a save, say) is one handler; two lambdas are two,
+    /// and so is one method subscribed on the controller's own Object Space and on a popup's, whose evidence differs.
+    /// </summary>
     private static string Key(ExtractedObjectSpaceHandler h) =>
-        $"{h.DeclaringNamespace}|{h.DeclaringClass}|{h.Event}|{h.Handler}" +
+        $"{h.DeclaringNamespace}|{h.DeclaringClass}|{h.Event}|{h.Handler}|{h.ReceiverUnconfirmed}" +
+        $"|{string.Join(",", h.ControllerTargets)}|{h.TargetOutsideApp}" +
         (h.Handler == "lambda" ? $"|{h.FilePath}|{h.Line}" : string.Empty);
 
     private static IEnumerable<ExtractedObjectSpaceHandler> Read(
@@ -326,8 +330,22 @@ public static class ObjectSpaceHandlerAnalyzer
         // Otherwise an application class name the namespace does not settle: left unattached.
     }
 
+    /// <remarks>
+    /// The constructor's assignment first: it runs after <c>ObjectViewController&lt;TView, TObject&gt;</c>'s and
+    /// replaces it. Only statements — an object initializer's <c>TargetObjectType</c> belongs to an action.
+    /// </remarks>
     private static string? WrittenTarget(ClassDeclarationSyntax declaration)
     {
+        var assigned = declaration.Members.OfType<ConstructorDeclarationSyntax>()
+            .SelectMany(c => c.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            .Where(a => a.Parent is ExpressionStatementSyntax
+                        && a.Left is IdentifierNameSyntax { Identifier.Text: "TargetObjectType" }
+                            or MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name.Identifier.Text: "TargetObjectType" })
+            .Select(a => a.Right is TypeOfExpressionSyntax typeOf ? typeOf.Type.ToString() : null)
+            .LastOrDefault(t => t is not null);
+        if (assigned is not null)
+            return assigned;
+
         foreach (var baseType in declaration.BaseList?.Types ?? default)
         {
             var type = baseType.Type is QualifiedNameSyntax q ? q.Right : baseType.Type;
@@ -335,12 +353,7 @@ public static class ObjectSpaceHandlerAnalyzer
                 return generic.TypeArgumentList.Arguments[1].ToString();
         }
 
-        return declaration.Members.OfType<ConstructorDeclarationSyntax>()
-            .SelectMany(c => c.DescendantNodes().OfType<AssignmentExpressionSyntax>())
-            .Where(a => a.Left is IdentifierNameSyntax { Identifier.Text: "TargetObjectType" }
-                        or MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name.Identifier.Text: "TargetObjectType" })
-            .Select(a => a.Right is TypeOfExpressionSyntax typeOf ? typeOf.Type.ToString() : null)
-            .LastOrDefault(t => t is not null);
+        return null;
     }
 
     // ----------------------------------------------------------------- names
