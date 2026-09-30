@@ -44,7 +44,8 @@ public class LifecycleRenderingTests
 
     [Fact]
     public void TheRulesDocumentSaysWhatItDoesNotList() =>
-        Assert.Contains("Logic attached from outside the class", Section("en", "_BusinessRules"));
+        Assert.Contains("in a job or a service, is not listed: a class missing from both may still change when it is saved",
+            Section("en", "_BusinessRules"));
 
     [Fact]
     public void AnEntityPageShowsTheHookItInherits() =>

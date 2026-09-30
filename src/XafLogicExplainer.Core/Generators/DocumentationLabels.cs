@@ -83,6 +83,7 @@ public class DocumentationLabels
     public string ComputedPropertiesDerived { get; init; } = "";
     public string ExplicitBusinessRules { get; init; } = "";
     public string LifecycleLogic { get; init; } = "";
+    public string ObjectSpaceLogic { get; init; } = "";
     public string ClassLevel { get; init; } = "";
     public string When { get; init; } = "";
 
@@ -367,6 +368,7 @@ public class DocumentationLabels
         ComputedPropertiesDerived = "Propiedades Calculadas (Logica Derivada)",
         ExplicitBusinessRules = "Reglas de Negocio Explicitas",
         LifecycleLogic = "Logica al Crear, Cargar y Guardar",
+        ObjectSpaceLogic = "Logica Enganchada al Object Space",
         ClassLevel = "clase",
         When = "cuando",
         Always = "siempre",
@@ -553,6 +555,7 @@ public class DocumentationLabels
         ComputedPropertiesDerived = "Computed Properties (Derived Logic)",
         ExplicitBusinessRules = "Explicit Business Rules",
         LifecycleLogic = "Logic on Create, Load and Save",
+        ObjectSpaceLogic = "Logic Attached to the Object Space",
         ClassLevel = "class",
         When = "when",
         Always = "always",

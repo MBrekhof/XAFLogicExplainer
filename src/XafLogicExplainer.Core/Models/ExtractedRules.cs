@@ -247,7 +247,8 @@ public enum LifecycleTrigger
 /// </summary>
 /// <remarks>
 /// Only what the class declares. Logic attached from outside it — a controller handling
-/// <c>ObjectSpace.Committing</c>, a job — is not read here, so a class with no hook is not a class
+/// <c>ObjectSpace.Committing</c> — is an <see cref="ExtractedObjectSpaceHandler"/>; a job that changes
+/// objects without an Object Space event is read nowhere, so a class with no hook is not a class
 /// nothing happens to on save.
 /// </remarks>
 public class ExtractedLifecycleHook

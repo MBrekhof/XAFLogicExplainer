@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using XafLogicExplainer.Core.Analyzers;
 using XafLogicExplainer.Core.Interfaces;
 using XafLogicExplainer.Core.Models;
 
@@ -450,6 +451,52 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
         var at = SourceCitation.Of(project, hook.FilePath, hook.Line) is { Length: > 0 } citation ? $" — {citation}" : "";
 
         return $"**{when}**: `{hook.MethodName}`{assigns}{at}";
+    }
+
+    /// <summary>One Object Space handler on one line: when it runs, the handler, why it is here, and where.</summary>
+    private string DescribeHandler(ExtractedProject project, ExtractedObjectSpaceHandler handler)
+    {
+        var at = SourceCitation.Of(project, handler.FilePath, handler.Line) is { Length: > 0 } citation ? $" — {citation}" : "";
+        return $"**{ObjectSpaceHandlers.When(handler.Event, L)}**: {ObjectSpaceHandlers.Describe(project, handler, L)}{at}";
+    }
+
+    /// <summary>
+    /// Every Object Space handler once per class it names, then per outside type a controller targets, then
+    /// those tied to no class.
+    /// </summary>
+    private void AppendObjectSpaceLogic(StringBuilder sb, ExtractedProject project)
+    {
+        sb.AppendLine($"## {_l.ObjectSpaceLogic}");
+        sb.AppendLine();
+        sb.AppendLine(L(
+            "Manejadores que un controlador u otra clase engancha a un evento del Object Space (`Committing`, " +
+            "`ObjectChanged`, ...). Una clase se nombra cuando el controlador del manejador la tiene como objetivo o el " +
+            "manejador comprueba si un objeto lo es; que se compruebe no significa que se cambie.",
+            "Handlers a controller or another class attaches to an Object Space event (`Committing`, `ObjectChanged`, " +
+            "...). A class is named when the handler's controller targets it or the handler checks whether an object is " +
+            "one; being checked does not mean being changed."));
+        sb.AppendLine();
+
+        var directory = new EntityDirectory(project.Entities);
+        foreach (var entity in project.Entities.OrderBy(e => directory.Label(e), StringComparer.Ordinal))
+            AppendHandlerGroup(sb, project, directory.Label(entity), ObjectSpaceHandlers.Naming(project, entity));
+
+        foreach (var outside in ObjectSpaceHandlers.ByOutsideTarget(project))
+            AppendHandlerGroup(sb, project, $"{L("Toda clase basada en", "Every class built on")} `{outside.Key}`", outside);
+
+        AppendHandlerGroup(sb, project, L("Sin clase de negocio", "Not tied to a business class"), ObjectSpaceHandlers.Unattached(project));
+    }
+
+    private void AppendHandlerGroup(StringBuilder sb, ExtractedProject project, string heading, IEnumerable<ExtractedObjectSpaceHandler> handlers)
+    {
+        var list = handlers.ToList();
+        if (list.Count == 0)
+            return;
+
+        sb.AppendLine($"### {heading}");
+        foreach (var handler in list)
+            sb.AppendLine($"- {DescribeHandler(project, handler)}");
+        sb.AppendLine();
     }
 
     /// <summary>
@@ -938,6 +985,18 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
                 sb.AppendLine();
             }
 
+            var handlers = ObjectSpaceHandlers.For(project, entity).ToList();
+            if (handlers.Count > 0)
+            {
+                sb.AppendLine($"### {_l.ObjectSpaceLogic}");
+                sb.AppendLine();
+                foreach (var handler in handlers)
+                {
+                    sb.AppendLine($"- {DescribeHandler(project, handler)}");
+                }
+                sb.AppendLine();
+            }
+
             sb.AppendLine("---");
             sb.AppendLine();
         }
@@ -1096,11 +1155,13 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
         sb.AppendLine();
         sb.AppendLine(L(
             "Metodos que una clase de negocio declara y que el Object Space llama al crear, cargar o guardar un objeto. " +
-            "La logica enganchada desde fuera de la clase (un controlador que maneja `ObjectSpace.Committing`, un job) " +
-            "no se lista: que una clase no aparezca aqui no significa que nada cambie al guardarla.",
+            $"Los manejadores que un controlador u otra clase engancha a eventos del Object Space estan en *{_l.ObjectSpaceLogic}*; " +
+            "la logica que cambia objetos sin tal evento, en un job o un servicio, no se lista: que una clase no aparezca " +
+            "en ninguna de las dos no significa que nada cambie al guardarla.",
             "Methods a business class declares that the Object Space calls when an object is created, loaded or saved. " +
-            "Logic attached from outside the class (a controller handling `ObjectSpace.Committing`, a job) is not " +
-            "listed: a class missing here may still change when it is saved."));
+            $"Handlers a controller or another class attaches to Object Space events are under *{_l.ObjectSpaceLogic}*; " +
+            "logic that changes objects without such an event, in a job or a service, is not listed: a class missing " +
+            "from both may still change when it is saved."));
         sb.AppendLine();
         foreach (var declared in LifecycleHooks.DeclaredIn(project).GroupBy(entry => entry.ClassName))
         {
@@ -1111,6 +1172,8 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
             }
             sb.AppendLine();
         }
+
+        AppendObjectSpaceLogic(sb, project);
 
         sb.AppendLine($"## {_l.ComputedPropertiesDerived}");
         sb.AppendLine();
