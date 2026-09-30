@@ -102,11 +102,21 @@ public static class ObjectSpaceHandlerAnalyzer
                 ReceiverUnconfirmed = receiver == Receiver.Unknown,
                 Checks = Checks(bodies, declaration, ns, directory),
             };
-            if (controller is not null)
+            // The target speaks for the controller's own Object Space only, not for one it creates.
+            if (controller is not null && IsOwnObjectSpace(target.Expression))
                 AttachTarget(handler, controller, declaration, directory, project);
             yield return handler;
         }
     }
+
+    /// <summary><c>ObjectSpace</c>, <c>this.ObjectSpace</c>, <c>View.ObjectSpace</c>, <c>Frame.View.ObjectSpace</c>.</summary>
+    private static bool IsOwnObjectSpace(ExpressionSyntax receiver) => Unwrap(receiver) switch
+    {
+        IdentifierNameSyntax { Identifier.Text: "ObjectSpace" } => true,
+        MemberAccessExpressionSyntax { Name.Identifier.Text: "ObjectSpace", Expression: var owner } =>
+            owner.ToString() is "this" or "View" or "this.View" or "Frame.View" or "this.Frame.View",
+        _ => false,
+    };
 
     // ----------------------------------------------------------------- receiver
 

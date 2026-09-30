@@ -36,4 +36,11 @@ public class OrderController : ObjectViewController<DetailView, Order>
         foreach (var order in ObjectSpace.ModifiedObjects.OfType<Order>())
             order.Stamp();
     }
+
+    // A popup's own Object Space: what this controller targets says nothing about it.
+    private void ShowPopup()
+    {
+        var popupSpace = Application.CreateObjectSpace(typeof(Invoice));
+        popupSpace.ObjectDeleted += (s, e) => { };
+    }
 }

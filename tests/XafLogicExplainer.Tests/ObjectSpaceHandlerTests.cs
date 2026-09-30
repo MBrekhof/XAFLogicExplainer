@@ -99,6 +99,15 @@ public class ObjectSpaceHandlerTests
     }
 
     [Fact]
+    public void AnObjectSpaceTheControllerCreatesIsNotItsTarget()
+    {
+        var popup = Assert.Single(P.Handlers("OrderController"), h => h.Event == ObjectSpaceEvent.ObjectDeleted);
+        Assert.True(popup.InController);
+        Assert.False(popup.ReceiverUnconfirmed);
+        Assert.Empty(popup.ControllerTargets);
+    }
+
+    [Fact]
     public void AControllerInANestedNamespaceBlockKeepsItsTarget() =>
         Assert.Equal([$"{Ns}.Vehicle"], Assert.Single(P.Handlers("VehicleController")).ControllerTargets);
 
