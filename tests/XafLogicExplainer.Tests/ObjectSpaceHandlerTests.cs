@@ -129,9 +129,11 @@ public class ObjectSpaceHandlerTests
     public void AnActionsTargetIsNotTheControllers() =>
         Assert.Empty(Assert.Single(P.Handlers("ActionTargetController")).ControllerTargets);
 
-    [Fact]
-    public void TheConstructorsTargetWinsOverTheGenericArgument() =>
-        Assert.Equal([$"{Ns}.Car"], Assert.Single(P.Handlers("CarOnlyController")).ControllerTargets);
+    [Theory]
+    [InlineData("CarOnlyController")]
+    [InlineData("CarByArrowController")]
+    public void TheConstructorsTargetWinsOverTheGenericArgument(string controller) =>
+        Assert.Equal([$"{Ns}.Car"], Assert.Single(P.Handlers(controller)).ControllerTargets);
 
     [Fact]
     public void AHandlerOnAPopupFirstStillCountsForTheControllersOwnSpace() =>

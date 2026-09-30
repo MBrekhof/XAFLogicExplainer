@@ -332,13 +332,14 @@ public static class ObjectSpaceHandlerAnalyzer
 
     /// <remarks>
     /// The constructor's assignment first: it runs after <c>ObjectViewController&lt;TView, TObject&gt;</c>'s and
-    /// replaces it. Only statements — an object initializer's <c>TargetObjectType</c> belongs to an action.
+    /// replaces it. Only statements and <c>=&gt;</c> bodies — an object initializer's <c>TargetObjectType</c>
+    /// belongs to an action.
     /// </remarks>
     private static string? WrittenTarget(ClassDeclarationSyntax declaration)
     {
         var assigned = declaration.Members.OfType<ConstructorDeclarationSyntax>()
             .SelectMany(c => c.DescendantNodes().OfType<AssignmentExpressionSyntax>())
-            .Where(a => a.Parent is ExpressionStatementSyntax
+            .Where(a => a.Parent is ExpressionStatementSyntax or ArrowExpressionClauseSyntax
                         && a.Left is IdentifierNameSyntax { Identifier.Text: "TargetObjectType" }
                             or MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name.Identifier.Text: "TargetObjectType" })
             .Select(a => a.Right is TypeOfExpressionSyntax typeOf ? typeOf.Type.ToString() : null)
