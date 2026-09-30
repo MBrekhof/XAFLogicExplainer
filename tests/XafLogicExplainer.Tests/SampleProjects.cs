@@ -101,6 +101,10 @@ internal static class SampleProjects
     public static string NullableNavigationXpoPath =>
         Path.Combine(FixturesRoot, "NullableAssociationSolution", "Rentals.Module");
 
+    /// <summary>Path to the module whose descendants hide or override an inherited navigation.</summary>
+    public static string HiddenNavigationPath =>
+        Path.Combine(FixturesRoot, "HiddenNavigationSolution", "Bookings.Module");
+
     /// <summary>Path to the module whose classes each have a second partial that adds an interface.</summary>
     public static string PartialLayoutPath =>
         Path.Combine(FixturesRoot, "PartialLayoutSolution", "Driving.Module");
@@ -216,6 +220,7 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyCompileRemove = new(() => Extract(CompileRemovePath));
     private static readonly Lazy<ExtractedProject> LazyNullableNavigationEf = new(() => Extract(NullableNavigationEfPath));
     private static readonly Lazy<ExtractedProject> LazyNullableNavigationXpo = new(() => Extract(NullableNavigationXpoPath));
+    private static readonly Lazy<ExtractedProject> LazyHiddenNavigation = new(() => Extract(HiddenNavigationPath));
     private static readonly Lazy<ExtractedProject> LazyPartialLayout = new(() => Extract(PartialLayoutPath));
     private static readonly Lazy<ExtractedProject> LazyUpdaters = new(() => Extract(UpdatersPath));
     private static readonly Lazy<ExtractedProject> LazyLifecycle = new(() => Extract(LifecyclePath));
@@ -330,6 +335,11 @@ internal static class SampleProjects
     /// The XPO counterpart: a rental's customer, an association written <c>Customer?</c>.
     /// </summary>
     public static ExtractedProject NullableNavigationXpo => LazyNullableNavigationXpo.Value;
+
+    /// <summary>
+    /// A booking's student, hidden by <c>new string Student</c> in one descendant and overridden in another.
+    /// </summary>
+    public static ExtractedProject HiddenNavigation => LazyHiddenNavigation.Value;
 
     /// <summary>
     /// A driving school whose classes are each split in two: the class on its base, and a partial

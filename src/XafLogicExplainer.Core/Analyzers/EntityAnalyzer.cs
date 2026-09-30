@@ -1431,6 +1431,14 @@ public class EntityAnalyzer : IEntityAnalyzer
             entity.IsPersistent = false;
 
         var own = entity.Properties.Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+
+        // A property redeclared with another type (`new string Student` over `Student Student`) hides the
+        // navigation, and the relationship behind it goes with it. Same type (an override) keeps it,
+        // however the type is spelled: `global::School.Student?` is still `Student`.
+        var hidden = parent.Properties
+            .Where(property => entity.Properties.Any(mine => mine.Name == property.Name
+                && !string.Equals(TypeSpelling(mine.TypeName), TypeSpelling(property.TypeName), StringComparison.Ordinal)))
+            .Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
         var inherited = new List<ExtractedProperty>();
 
         foreach (var property in parent.Properties)
@@ -1455,7 +1463,8 @@ public class EntityAnalyzer : IEntityAnalyzer
         FoldInto(entity.AppearanceRules, parent.AppearanceRules, parent.ClassName, AppearanceRuleKey,
                  rule => rule.Clone(), (rule, declarer) => rule.InheritedFrom ??= declarer);
 
-        FoldInto(entity.Relationships, parent.Relationships, parent.ClassName, rel => rel.PropertyName,
+        FoldInto(entity.Relationships, parent.Relationships.Where(rel => !hidden.Contains(rel.PropertyName)).ToList(),
+                 parent.ClassName, rel => rel.PropertyName,
                  rel => rel.Clone(), (rel, declarer) => rel.InheritedFrom ??= declarer);
 
         // A hook runs for a descendant only if nothing stops it: an override of the same method that
@@ -1967,6 +1976,10 @@ public class EntityAnalyzer : IEntityAnalyzer
     /// <c>Student ?</c> is valid C# and the type is kept as written.
     /// </summary>
     private static string ReferencedClassName(string typeName) => typeName.Trim().TrimEnd('?').TrimEnd();
+
+    /// <summary>A type as written, without namespace qualifiers, nullable annotations or spaces.</summary>
+    private static string TypeSpelling(string? typeName) =>
+        System.Text.RegularExpressions.Regex.Replace(typeName ?? string.Empty, @"(?:\w+(?:::|\.))+|\?|\s", string.Empty);
 
     private static string ExtractGenericArgument(string typeName)
     {

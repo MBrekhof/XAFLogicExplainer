@@ -9,6 +9,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A descendant that hid an inherited navigation kept its relationship.** Properties folded by name,
+  so `public new string Student` over the base's `Student Student` won the property list, but the base's
+  relationship folded under its own name and the descendant has none of that name: the index showed a
+  `string` property beside a relationship to `Student`. A property redeclared with another type now takes
+  the relationship with it; an override of the same type keeps it. The relationships of five real applications are unchanged.
+
+- **A default editor registered for a type did not reach a nullable property of that type.** XAF looks
+  a `Nullable<T>` property's editor up through `T`, so `[PropertyEditor(typeof(decimal), true)]` renders
+  `decimal?` too; the editor's "used by" list compared the type as written and missed it. The editor links
+  of five real applications are unchanged.
+
+- **Seeds written `new T(session)` in sibling blocks were one record.** Every creation assigned to a
+  variable took the previous record, so two blocks each writing `var ward = new Ward(Session)` read as
+  one ward carrying the last block's values — and any `new` inside a statement assigning a variable was
+  read as that variable's creation, a criteria operator in a lookup or a `DateTime` in an initializer
+  included. Each creation assigned to a variable now has its own record. On a real application this
+  removes three false records, each a `new BinaryOperator(…)` in a lookup: two empty, and a second copy
+  of a role.
+
 - **A to-one navigation written with a nullable annotation was not a relationship.** The type of
   `public virtual Student? Student` was compared with the application's class names question mark
   included, so it matched none of them. With nullable reference types on, every reference that may be

@@ -74,6 +74,30 @@ public class EditorTests
     }
 
     [Fact]
+    public void LinksAnEditorForATypeToANullablePropertyOfThatType()
+    {
+        // XAF looks a Nullable<T> property up through T as well (LookupChainHelper), so an editor
+        // registered for decimal renders a decimal? property too.
+        var project = ProjectWith(
+            new ExtractedEditor { ClassName = "MoneyEditor", TargetType = "decimal", IsDefault = true },
+            propertyType: "decimal?");
+
+        Assert.Contains("Invoice", project.Editors.Single().UsedBy);
+    }
+
+    [Fact]
+    public void LinksAnEditorForANullableTypeToThatTypeOnly()
+    {
+        // typeof(decimal?) is its own entry in the lookup chain, ahead of decimal; a plain decimal
+        // property's chain never reaches it.
+        var editor = new ExtractedEditor { ClassName = "OptionalMoneyEditor", TargetType = "decimal?", IsDefault = true };
+
+        Assert.Contains("Invoice", ProjectWith(editor, propertyType: "decimal?").Editors.Single().UsedBy);
+        Assert.Empty(ProjectWith(new ExtractedEditor
+            { ClassName = "OptionalMoneyEditor", TargetType = "decimal?", IsDefault = true }).Editors.Single().UsedBy);
+    }
+
+    [Fact]
     public void NeverLinksAnEditorRegisteredForEveryType()
     {
         // [PropertyEditor(typeof(object), …)] claims everything; naming every property in the
@@ -139,7 +163,7 @@ public class EditorTests
             constants["CustomEditorAliases.BarcodeScannerPropertyEditor"]);
     }
 
-    private static ExtractedProject ProjectWith(ExtractedEditor editor)
+    private static ExtractedProject ProjectWith(ExtractedEditor editor, string propertyType = "decimal")
     {
         var project = new ExtractedProject
         {
@@ -149,7 +173,7 @@ public class EditorTests
                 new ExtractedEntity
                 {
                     ClassName = "Invoice",
-                    Properties = { new ExtractedProperty { Name = "Total", TypeName = "decimal" } },
+                    Properties = { new ExtractedProperty { Name = "Total", TypeName = propertyType } },
                 },
             },
             Editors = { editor },

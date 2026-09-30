@@ -263,6 +263,7 @@ public class UpdaterAnalyzer
             }
 
             seed.EntityType = typeName;
+            SeedRecord? initialized = null;
 
             if (creation.Initializer != null)
             {
@@ -277,30 +278,31 @@ public class UpdaterAnalyzer
                     }
                 }
                 if (record.PropertyValues.Count > 0)
-                    seed.Records.Add(record);
+                    seed.Records.Add(initialized = record);
             }
 
             // Also check for property assignments after creation: var x = new Type(); x.Prop = value;
-            var assignmentParent = creation.Ancestors().OfType<LocalDeclarationStatementSyntax>().FirstOrDefault();
-            var equalsClause = creation.Ancestors().OfType<EqualsValueClauseSyntax>().FirstOrDefault();
+            // Only when the creation is the value itself: a `new DateTime(…)` inside another creation's
+            // initializer is a value of that object, not an object held by the enclosing variable.
+            // Parentheses, casts, `??` and `?:` pass the value through: `Find(…) ?? new Ward(Session)`.
+            SyntaxNode value = creation;
+            while (value.Parent is ParenthesizedExpressionSyntax or CastExpressionSyntax
+                   || value.Parent is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.CoalesceExpression }
+                   || (value.Parent is ConditionalExpressionSyntax conditional && conditional.Condition != value))
+                value = value.Parent;
 
-            string? variableName = null;
-            if (assignmentParent != null)
+            var variableName = value.Parent switch
             {
-                variableName = assignmentParent.Declaration.Variables.FirstOrDefault()?.Identifier.Text;
-            }
-            else
-            {
-                var assignExpr = creation.Ancestors().OfType<AssignmentExpressionSyntax>().FirstOrDefault();
-                if (assignExpr != null)
-                    variableName = assignExpr.Left.ToString();
-            }
+                EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax declarator } => declarator.Identifier.Text,
+                AssignmentExpressionSyntax assignExpr when assignExpr.Right == value => assignExpr.Left.ToString(),
+                _ => null,
+            };
 
             if (variableName != null)
             {
-                var record = seed.Records.LastOrDefault() ?? new SeedRecord();
-                if (!seed.Records.Contains(record))
-                    seed.Records.Add(record);
+                // This creation's own record: the one its initializer started, else a new one. Taking
+                // the last record made two sibling blocks' `var role = new Role(session)` one record.
+                var record = initialized ?? new SeedRecord();
 
                 // Find subsequent property assignments
                 var block = ScopeOf(creation, variableName, method.Body);
@@ -316,6 +318,9 @@ public class UpdaterAnalyzer
                         record.PropertyValues[mae.Name.ToString()] = SyntaxLiteral.ValueOf(assignment.Right);
                     }
                 }
+
+                if (record != initialized && record.PropertyValues.Count > 0)
+                    seed.Records.Add(record);
             }
         }
 

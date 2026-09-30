@@ -277,14 +277,21 @@ public class LogicExtractor : ILogicExtractor
                 var matches = entity.Properties.Any(p =>
                     (!string.IsNullOrWhiteSpace(editor.Alias) &&
                      string.Equals(p.EditorAlias, editor.Alias, StringComparison.Ordinal))
-                    || (appliesByType &&
-                        string.Equals(StripGeneric(p.TypeName), target, StringComparison.Ordinal)));
+                    || (appliesByType && ReachesEditorFor(StripGeneric(p.TypeName), target!)));
 
                 if (matches)
                     editor.UsedBy.Add(entity.ClassName);
             }
         }
     }
+
+    /// <summary>
+    /// Whether XAF's editor lookup for a property of this type reaches an editor registered for the
+    /// target: the type itself, and for <c>T?</c> then <c>T</c> — never the other way round.
+    /// </summary>
+    private static bool ReachesEditorFor(string propertyType, string target) =>
+        string.Equals(propertyType, target, StringComparison.Ordinal)
+        || string.Equals(propertyType.TrimEnd('?').TrimEnd(), target, StringComparison.Ordinal);
 
     /// <summary>Turns <c>XPCollection&lt;OrderLine&gt;</c> into <c>OrderLine</c>.</summary>
     private static string StripGeneric(string? typeName)

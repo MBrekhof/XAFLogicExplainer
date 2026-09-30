@@ -59,4 +59,62 @@ public class UpdaterDiscoveryTests
         Assert.DoesNotContain(
             SampleProjects.Updaters.SeedData,
             seed => seed.MethodName == "SeedSurgeonRole");
+
+    [Fact]
+    public void TwoBlocksCreatingWithNewSeedTwoDifferentRecords()
+    {
+        // The Session-based `new T(session)` path took the previous record for every creation into a
+        // variable, so the blocks below read as one ward carrying the last block's name.
+        var records = Assert.Single(SeedOf("""
+            if (NeedsNorth)
+            {
+                var ward = new Ward(Session);
+                ward.Name = "North";
+            }
+            if (NeedsSouth)
+            {
+                var ward = new Ward(Session);
+                ward.Name = "South";
+            }
+            var east = new Ward(Session) { Name = "East", OpenedOn = new DateTime(2026, 1, 1) };
+            east.Code = "E";
+            var west = FindWard("West") ?? new Ward(Session);
+            west.Name = "West";
+            """)).Records;
+
+        // The DateTime inside East's initializer is a value, not a second ward; West is looked up or created.
+        Assert.Equal(["North", "South", "East", "West"], records.Select(record => record.PropertyValues["Name"]));
+        Assert.Equal("E", records[2].PropertyValues["Code"]);
+    }
+
+    /// <summary>Runs the analyzer over a one-off updater whose seeding method has the given body.</summary>
+    private static List<Core.Models.ExtractedSeedData> SeedOf(string body)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"xaflogic-seed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "Updater.cs"), $$"""
+                using System;
+                using DevExpress.ExpressApp.Updating;
+
+                public class Updater : ModuleUpdater
+                {
+                    public override void UpdateDatabaseAfterUpdateSchema() => SeedWards();
+
+                    private void SeedWards()
+                    {
+                        {{body}}
+                    }
+                }
+                """);
+
+            return new Core.Analyzers.UpdaterAnalyzer().AnalyzeUpdater(directory, new Core.Models.ExtractionOptions());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }
