@@ -79,6 +79,50 @@ public class ObjectSpaceHandlerRenderingTests
         Assert.Contains("is not inventoried, so not finding it proves nothing.", index);
     }
 
+    [Fact]
+    public async Task TheRulesToolShowsAClassWhoseOnlyLogicIsAHandler()
+    {
+        var result = await Detail.RulesAsync("Invoice", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("### Attached to the Object Space", result);
+        Assert.Contains("- after a save: `InvoiceController.Committed`, controller for `Invoice`", result);
+    }
+
+    [Fact]
+    public async Task TheRulesToolShowsAClassTheHandlerOfItsBase() =>
+        Assert.Contains("`VehicleController` (lambda), controller for `Vehicle`",
+            await Detail.RulesAsync("Car", cancellationToken: TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task TheApplicationsRuleSetListsTheOutsideTargetAndTheUnattached()
+    {
+        var result = await Detail.RulesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("## Every class built on `IAudited`", result);
+        Assert.Contains("## Not tied to a business class", result);
+        Assert.Contains("`PlainViewController.OnDeleting`", result);
+    }
+
+    [Fact]
+    public async Task TheEntityToolShowsItsHandlers() =>
+        Assert.Contains("`OrderController.ObjectSpace_Committing`",
+            await Detail.EntityAsync("Order", cancellationToken: TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task SearchFindsAHandlerByItsName() =>
+        Assert.Contains("**handler** `OrderController.ObjectSpace_Committing`, controller for `Order`, checks `Order` — runs before a save",
+            await Discovery.SearchAsync("ObjectSpace_Committing", cancellationToken: TestContext.Current.CancellationToken));
+
+    [Fact]
+    public void TheExplainPageShowsAHandlerOnlyClassAndTheUnattached()
+    {
+        var page = new HtmlExplainerGenerator("0.17.2").Generate(SampleProjects.ObjectSpaceHandlers);
+
+        Assert.Contains("<th>Attached to the Object Space</th><th>Handler</th>", page);
+        Assert.Contains("<span class=\"mono\">InvoiceController.Committed</span>, controller for <span class=\"mono\">Invoice</span>", page);
+        Assert.Contains("<span class=\"card__name\">Not tied to a business class</span>", page);
+    }
+
     /// <summary>The text from a heading to the next heading of the same level or higher.</summary>
     private static string Block(string document, string heading)
     {

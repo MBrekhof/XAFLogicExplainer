@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using XafLogicExplainer.Core.Analyzers;
 using XafLogicExplainer.Core.Models;
 
@@ -901,17 +902,19 @@ public sealed class HtmlExplainerGenerator
         var withRules = project.Entities
             .Where(e => e.ValidationRules.Count > 0 || e.AppearanceRules.Count > 0
                      || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias))
-                     || e.Lifecycle.Count > 0)
+                     || e.Lifecycle.Count > 0
+                     || ObjectSpaceHandlers.For(project, e).Any())
             .OrderBy(e => e.ClassName, StringComparer.Ordinal)
             .ToList();
+        var unattached = ObjectSpaceHandlers.Unattached(project).ToList();
 
         sb.AppendLine("<section id=\"rules\">");
         sb.AppendLine("  <h2>What the application enforces</h2>");
-        sb.AppendLine("  <p class=\"lede\">Validation the user will hit, behavior that changes with the data, figures the database computes, and what a class does when one of its objects is created, loaded or saved.</p>");
+        sb.AppendLine("  <p class=\"lede\">Validation the user will hit, behavior that changes with the data, figures the database computes, and what runs when an object is created, loaded or saved — in the class itself, or attached to the Object Space by a controller.</p>");
 
-        if (withRules.Count == 0)
+        if (withRules.Count == 0 && unattached.Count == 0)
         {
-            sb.AppendLine("  <p class=\"empty\">No validation, appearance rules, calculated properties or methods run on create, load or save are declared.</p>");
+            sb.AppendLine("  <p class=\"empty\">No validation, appearance rules, calculated properties, methods run on create, load or save, or handlers attached to the Object Space are declared.</p>");
             sb.AppendLine("</section>");
             return;
         }
@@ -919,10 +922,12 @@ public sealed class HtmlExplainerGenerator
         foreach (var entity in withRules)
         {
             var calculated = entity.Properties.Where(p => !string.IsNullOrWhiteSpace(p.PersistentAlias)).ToList();
+            var handlers = ObjectSpaceHandlers.For(project, entity).ToList();
             var haystack = Haystack(entity.ClassName,
                 string.Join(" ", entity.ValidationRules.Select(r => r.RuleType + " " + r.MessageTemplate)),
                 string.Join(" ", entity.AppearanceRules.Select(r => r.Id + " " + r.Criteria)),
-                string.Join(" ", entity.Lifecycle.Select(h => h.MethodName + " " + string.Join(" ", h.AssignedProperties))));
+                string.Join(" ", entity.Lifecycle.Select(h => h.MethodName + " " + string.Join(" ", h.AssignedProperties))),
+                string.Join(" ", handlers.Select(h => h.DeclaringClass + " " + h.Handler)));
 
             sb.AppendLine($"  <article class=\"card\" data-search=\"{haystack}\">");
             sb.AppendLine($"    <div class=\"card__head\"><span class=\"card__name\">{E(entity.ClassName)}</span></div>");
@@ -996,10 +1001,41 @@ public sealed class HtmlExplainerGenerator
                 sb.AppendLine("    </tbody></table>");
             }
 
+            WriteHandlers(sb, project, handlers);
+
+            sb.AppendLine("  </article>");
+        }
+
+        if (unattached.Count > 0)
+        {
+            sb.AppendLine($"  <article class=\"card\" data-search=\"{Haystack(string.Join(" ", unattached.Select(h => h.DeclaringClass + " " + h.Handler)))}\">");
+            sb.AppendLine("    <div class=\"card__head\"><span class=\"card__name\">Not tied to a business class</span></div>");
+            WriteHandlers(sb, project, unattached);
             sb.AppendLine("  </article>");
         }
 
         sb.AppendLine("</section>");
+    }
+
+    /// <summary>Handlers attached to Object Space events: when they run, and why they are listed here.</summary>
+    private static void WriteHandlers(StringBuilder sb, ExtractedProject project, IReadOnlyList<ExtractedObjectSpaceHandler> handlers)
+    {
+        if (handlers.Count == 0)
+            return;
+
+        // "Checks", not "changes": a type test is evidence the handler concerns the class, nothing more.
+        sb.AppendLine("    <table><thead><tr><th>Attached to the Object Space</th><th>Handler</th></tr></thead><tbody>");
+        foreach (var handler in handlers)
+        {
+            var described = Regex.Replace(
+                E(ObjectSpaceHandlers.Describe(project, handler, ObjectSpaceHandlers.English)),
+                "`([^`]+)`", "<span class=\"mono\">$1</span>");
+            var at = Cite(project, handler.FilePath, handler.Line) is { Length: > 0 } where
+                ? $" <span class=\"mono t\">{where}</span>"
+                : "";
+            sb.AppendLine($"      <tr><td class=\"t\">{E(ObjectSpaceHandlers.When(handler.Event))}</td><td>{described}{at}</td></tr>");
+        }
+        sb.AppendLine("    </tbody></table>");
     }
 
     // -------------------------------------------------------------- criteria

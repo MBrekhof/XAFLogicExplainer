@@ -61,10 +61,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that declared it, on each entity's page and in `xaf_rules` under every class it runs for, in `xaf_search`,
   and on the explain page. A hook on a base reaches a descendant only when the descendant does not override
   the method without calling `base`. What is assigned is listed, not when: a condition around an assignment
-  is not read, and an assignment inside a lambda or a local function is left out. Logic attached from outside
-  the class, such as a controller handling `ObjectSpace.Committing`, is not read, and `AGENTS.md` now says
-  that its completeness does not extend to it. On the largest of four real applications nine classes run
-  such a hook; the other three declare none.
+  is not read, and an assignment inside a lambda or a local function is left out. On the largest of four
+  real applications nine classes run such a hook; the other three declare none.
+
+- **What runs on save from outside the business class.** XAF's second documented place for that logic is a
+  handler on the Object Space — `Committing`, `Committed`, `ObjectChanged`, `ObjectSaving`, `ObjectSaved`,
+  `ObjectDeleting`, `ObjectDeleted` — usually in a controller, sometimes in a plain class that hooks every
+  Object Space the application creates. Every such subscription in the module and the platform projects
+  beside it is now listed with the business classes it concerns: the class its controller targets (only for
+  the controller's own Object Space, not one it creates for a popup), and the classes the handler tests an
+  object for with `is`, `as`, a cast or `OfType`, following calls into its own class. Being tested for does
+  not mean being changed, and the documents say so. A controller that targets an interface or a DevExpress
+  base is listed for every class built on it; a class name two namespaces share is not guessed; an XPO
+  `Session`'s `ObjectSaving` is not an Object Space event, and a receiver whose type the source does not
+  show is kept and marked. They appear in a new business rules section, on each entity's page with those of
+  its base classes, in `xaf_rules`, `xaf_entity` and `xaf_search`, and on the explain page, which also has a
+  card for handlers tied to no class. `AGENTS.md` now says only logic that changes objects without such an
+  event is not inventoried. On the largest real application this is 10 handlers in 10 controllers, 7 tied to
+  a business class; on a generated one, 8 handlers, including the generated rules that check `Exam` and
+  `Lesson`; the other two applications have none.
 
 ## [0.17.2] — 2026-09-13
 

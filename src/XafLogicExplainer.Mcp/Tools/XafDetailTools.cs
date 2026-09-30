@@ -37,7 +37,8 @@ public sealed class XafDetailTools
     [Description(
         "Full detail of one business entity: every property with its type and attributes, " +
         "relationships to other entities, validation rules, appearance rules, calculated " +
-        "property expressions, and the methods it runs when an object is created, loaded or saved. " +
+        "property expressions, the methods it runs when an object is created, loaded or saved, and " +
+        "the handlers controllers attach to Object Space events for it. " +
         "Use before writing or changing any code that touches an entity.")]
     public async Task<string> EntityAsync(
         [Description("Entity class name, e.g. 'Invoice'. Case-insensitive.")] string name,
@@ -116,6 +117,7 @@ public sealed class XafDetailTools
         }
 
         AppendRules(sb, entity);
+        AppendHandlers(sb, app, ObjectSpaceHandlers.For(app, entity));
 
         return sb.ToString();
     }
@@ -248,8 +250,9 @@ public sealed class XafDetailTools
         "The business rules the application enforces: validation rules with their messages and " +
         "conditions, conditional appearance rules, calculated properties, and the methods a class " +
         "runs when an object is created, loaded or saved (OnCreated, OnSaving, AfterConstruction). " +
-        "Use when asked what the system requires, forbids, computes, or does on save. Logic attached " +
-        "from outside a class, such as a controller handling ObjectSpace.Committing, is not included. " +
+        "Use when asked what the system requires, forbids, computes, or does on save. Handlers that " +
+        "controllers and other classes attach to Object Space events (Committing, ObjectChanged, ...) are " +
+        "included; logic that changes objects without such an event, in a job or a service, is not. " +
         "Optionally narrowed to one entity.")]
     public async Task<string> RulesAsync(
         [Description("Restrict to one entity. Omit for every rule in the application.")] string? entity = null,
@@ -277,10 +280,12 @@ public sealed class XafDetailTools
               || e.AppearanceRules.Any(r => r.InheritedFrom is null)
               || e.Properties.Any(p => p.InheritedFrom is null && !string.IsNullOrWhiteSpace(p.PersistentAlias))
               || e.Lifecycle.Any(h => h.InheritedFrom is null)
+              || ObjectSpaceHandlers.Naming(app, e).Any()
             : e.ValidationRules.Count > 0
               || e.AppearanceRules.Count > 0
               || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias))
-              || e.Lifecycle.Count > 0;
+              || e.Lifecycle.Count > 0
+              || ObjectSpaceHandlers.For(app, e).Any();
 
         var relevant = entities.Where(Governs).ToList();
 
@@ -293,13 +298,18 @@ public sealed class XafDetailTools
                 .ToList()
             : [];
 
-        if (relevant.Count == 0 && borrowedHooks.Count == 0)
+        // Handlers no application class stands for: a controller targeting an interface or a DevExpress
+        // base, and handlers that name no class. Listed once, with the application's rule set.
+        var outsideHandlers = wholeApplication ? ObjectSpaceHandlers.ByOutsideTarget(app).ToList() : [];
+        var unattached = wholeApplication ? ObjectSpaceHandlers.Unattached(app).ToList() : [];
+
+        if (relevant.Count == 0 && borrowedHooks.Count == 0 && outsideHandlers.Count == 0 && unattached.Count == 0)
         {
-            // "Declares", because that is all that was read: a controller handling ObjectSpace.Committing
-            // may still change the object on save.
+            // "Declares", because that is all that was read: a job may still change the object without
+            // raising an Object Space event.
             return wholeApplication
-                ? $"{app.ProjectName} declares no validation rules, appearance rules, calculated properties or methods run on create, load or save. Logic attached from outside a class is not read."
-                : $"`{entity}` declares no rule that validates, styles or calculates and no method run on create, load or save, and inherits none. Logic attached from outside the class is not read.";
+                ? $"{app.ProjectName} declares no validation rules, appearance rules, calculated properties or methods run on create, load or save, and has no handler attached to an Object Space event. Logic that changes objects without such an event is not read."
+                : $"`{entity}` declares no rule that validates, styles or calculates and no method run on create, load or save, inherits none, and has no handler attached to an Object Space event. Logic that changes objects without such an event is not read.";
         }
 
         var sb = new StringBuilder();
@@ -310,6 +320,7 @@ public sealed class XafDetailTools
             sb.AppendLine();
             sb.AppendLine($"## {target.ClassName}");
             AppendRules(sb, target, declaredOnly: wholeApplication);
+            AppendHandlers(sb, app, wholeApplication ? ObjectSpaceHandlers.Naming(app, target) : ObjectSpaceHandlers.For(app, target));
         }
 
         foreach (var declared in borrowedHooks)
@@ -317,6 +328,20 @@ public sealed class XafDetailTools
             sb.AppendLine();
             sb.AppendLine($"## {declared.Key}");
             AppendHooks(sb, declared.Select(entry => entry.Hook).ToList());
+        }
+
+        foreach (var outside in outsideHandlers)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"## Every class built on `{outside.Key}`");
+            AppendHandlers(sb, app, outside);
+        }
+
+        if (unattached.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Not tied to a business class");
+            AppendHandlers(sb, app, unattached);
         }
 
         return sb.ToString();
@@ -896,6 +921,30 @@ public sealed class XafDetailTools
             .Where(h => Wanted(h.InheritedFrom))
             .OrderByDescending(h => h.InheritedFrom is null)
             .ToList());
+    }
+
+    /// <summary>
+    /// Handlers controllers and other classes attach to Object Space events.
+    /// </summary>
+    /// <remarks>
+    /// A class is named because a handler's controller targets it or the handler checks for it — not
+    /// because the handler is known to change it.
+    /// </remarks>
+    private static void AppendHandlers(StringBuilder sb, ExtractedProject app, IEnumerable<ExtractedObjectSpaceHandler> handlers)
+    {
+        var list = handlers.ToList();
+        if (list.Count == 0)
+            return;
+
+        sb.AppendLine();
+        sb.AppendLine("### Attached to the Object Space");
+        sb.AppendLine();
+
+        foreach (var handler in list)
+        {
+            var at = At(handler.FilePath, handler.Line) is { Length: > 0 } where ? $" — {where}" : "";
+            sb.AppendLine($"- {ObjectSpaceHandlers.When(handler.Event)}: {ObjectSpaceHandlers.Describe(app, handler, ObjectSpaceHandlers.English)}{at}");
+        }
     }
 
     /// <summary>

@@ -86,7 +86,7 @@ public class LifecycleRenderingTests
         var result = await Detail.RulesAsync("Wheel", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("`Wheel` declares no rule that validates, styles or calculates and no method run on create, load or save", result);
-        Assert.Contains("Logic attached from outside the class is not read.", result);
+        Assert.Contains("and has no handler attached to an Object Space event. Logic that changes objects without such an event is not read.", result);
     }
 
     [Fact]

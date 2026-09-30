@@ -193,6 +193,12 @@ public sealed class XafDiscoveryTools
                     : "";
                 hits.Add($"**rule** `{className}` {hook.MethodName} — runs {LifecycleHooks.When(hook.Trigger)}{assigns}");
             }
+
+            // Save-time logic attached from outside the class, looked for by its handler or its class.
+            foreach (var handler in app.ObjectSpaceHandlers.Where(h => Matches(h.Handler) || Matches(h.DeclaringClass)))
+            {
+                hits.Add($"**handler** {ObjectSpaceHandlers.Describe(app, handler, ObjectSpaceHandlers.English)} — runs {ObjectSpaceHandlers.When(handler.Event)}");
+            }
         }
 
         foreach (var controller in app.Controllers)
