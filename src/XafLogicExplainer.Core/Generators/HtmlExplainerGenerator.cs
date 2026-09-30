@@ -1228,8 +1228,13 @@ public sealed class HtmlExplainerGenerator
         {
             sb.AppendLine($"  <article class=\"card\" data-search=\"{Haystack(seed.MethodName, seed.EntityType, seed.Description)}\">");
             sb.AppendLine("    <div class=\"card__head\">");
-            sb.AppendLine($"      <span class=\"card__name\">{E(seed.MethodName)}</span>");
-            sb.AppendLine($"      <span class=\"card__meta\">creates {E(seed.EntityType)} · {seed.Records.Count} record{(seed.Records.Count == 1 ? "" : "s")}</span>");
+            // What an update method creates itself is named after the class it creates: every
+            // updater has an UpdateDatabaseAfterUpdateSchema, so the method name tells them apart not at all.
+            var inUpdateMethod = seed.MethodName is "UpdateDatabaseAfterUpdateSchema" or "UpdateDatabaseBeforeUpdateSchema";
+            var where = inUpdateMethod && seed.UpdaterClass.Length > 0 ? $" · in {seed.UpdaterClass}.{seed.MethodName}" : "";
+
+            sb.AppendLine($"      <span class=\"card__name\">{E(inUpdateMethod ? seed.EntityType : seed.MethodName)}</span>");
+            sb.AppendLine($"      <span class=\"card__meta\">creates {E(seed.EntityType)} · {seed.Records.Count} record{(seed.Records.Count == 1 ? "" : "s")}{E(where)}</span>");
             sb.AppendLine("    </div>");
 
             var columns = seed.Records

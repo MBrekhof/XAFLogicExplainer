@@ -1270,7 +1270,7 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
             {
                 sb.AppendLine($"### {seed.Description}");
                 sb.AppendLine();
-                sb.AppendLine($"**{_l.Entity}:** `{seed.EntityType}` | **{_l.Method}:** `{seed.MethodName}`");
+                sb.AppendLine($"**{_l.Entity}:** `{seed.EntityType}` | **{_l.Method}:** `{(seed.UpdaterClass.Length > 0 ? $"{seed.UpdaterClass}.{seed.MethodName}" : seed.MethodName)}`");
                 sb.AppendLine();
 
                 if (seed.Records.Count > 0)

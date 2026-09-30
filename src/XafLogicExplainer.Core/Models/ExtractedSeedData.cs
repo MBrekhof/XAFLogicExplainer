@@ -16,6 +16,12 @@ public class ExtractedSeedData
     public string MethodName { get; set; } = string.Empty;
 
     /// <summary>
+    /// The updater class declaring the method. A module has as many updaters as it likes, and each
+    /// has its own <c>UpdateDatabaseAfterUpdateSchema</c>.
+    /// </summary>
+    public string UpdaterClass { get; set; } = string.Empty;
+
+    /// <summary>
     /// Human-readable inferred description of the seed operation.
     /// </summary>
     public string Description { get; set; } = string.Empty;

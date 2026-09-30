@@ -9,6 +9,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Seed data passed to a helper, built for a lookup, or created in the update method itself was read
+  wrong or not at all.** A helper that receives its values — `SeedRole("Administrators", …)` over
+  `role.Name = name` — read as one role called `name`; each call is now bound to the helper's
+  declaration and becomes a record, a literal argument its value and anything else "set by the caller".
+  A `new BinaryOperator(…)` in a lookup made the seed a `BinaryOperator`: `new T(…)` now counts only for
+  the module's business classes, XAF's security classes and an XPO `new T(session)`. Users created with
+  `UserManager.CreateUser<T>` are seeds, with their user name. What `UpdateDatabaseAfterUpdateSchema`
+  creates itself was read only when the method called its base, all under one title "Update Database
+  After Update Schema" and the class it created last; it is now read on its own terms, one seed per class
+  created, named after that class. On a hand-written application the roles seeded through one helper go
+  from one record reading `name` to thirteen named roles, and four named test and service users appear;
+  on a generated one six seeds titled alike become eleven titled by what they create, three of them users.
+  Still not read: values set inside a `configure`/`customizeUser` delegate, helpers in another class, and
+  names produced in a loop. The diff still keys seeds by method name.
+
 - **A descendant that hid an inherited navigation kept its relationship.** Properties folded by name,
   so `public new string Student` over the base's `Student Student` won the property list, but the base's
   relationship folded under its own name and the descendant has none of that name: the index showed a

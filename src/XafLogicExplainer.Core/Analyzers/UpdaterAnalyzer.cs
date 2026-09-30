@@ -15,50 +15,77 @@ public class UpdaterAnalyzer
     /// </summary>
     /// <param name="sourceDirectory">Project source root.</param>
     /// <param name="options">Extraction options controlling output detail.</param>
+    /// <param name="businessClasses">
+    /// The module's business class names. When given, <c>new T(…)</c> counts as a seed only for one
+    /// of them (or XAF's security classes, or an XPO <c>new T(session)</c>); without it, every
+    /// <c>new</c> does, as before.
+    /// </param>
     /// <returns>Extracted seed-data descriptors.</returns>
-    public List<ExtractedSeedData> AnalyzeUpdater(string sourceDirectory, ExtractionOptions options)
+    public List<ExtractedSeedData> AnalyzeUpdater(
+        string sourceDirectory,
+        ExtractionOptions options,
+        IReadOnlyCollection<string>? businessClasses = null)
     {
+        var known = businessClasses is null ? null : new HashSet<string>(businessClasses, StringComparer.Ordinal);
+
         // Each updater on its own terms, one after the other: a seed method is recorded once per
         // updater, and two updaters with a method of the same name seed two different things.
         return FindUpdaterClasses(sourceDirectory)
-            .SelectMany(classDecl => SeedDataOf(classDecl, options))
+            .SelectMany(classDecl => SeedDataOf(classDecl, options, known))
             .ToList();
     }
 
     /// <summary>
     /// The seed data one updater class creates.
     /// </summary>
-    private static List<ExtractedSeedData> SeedDataOf(ClassDeclarationSyntax classDecl, ExtractionOptions options)
+    /// <remarks>
+    /// The update methods come with the methods they call, in call order; every other method is
+    /// read where it is declared. Each declaration is read once — by declaration, not by name, so
+    /// two overloads of one helper are two seeds.
+    /// </remarks>
+    private static List<ExtractedSeedData> SeedDataOf(ClassDeclarationSyntax classDecl, ExtractionOptions options, HashSet<string>? known)
     {
         var seedData = new List<ExtractedSeedData>();
+        var visited = new HashSet<MethodDeclarationSyntax>();
+        var methods = classDecl.Members.OfType<MethodDeclarationSyntax>().ToList();
 
-        // Find all methods that create seed data
-        foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
+        void Visit(MethodDeclarationSyntax method)
         {
-            var methodName = method.Identifier.Text;
+            if (visited.Add(method) && method.Body is not null)
+                seedData.AddRange(SeedsOf(classDecl, method, options, known));
+        }
 
-            // Skip standard XAF methods that aren't seed data
-            if (methodName is "UpdateDatabaseAfterUpdateSchema" or "UpdateDatabaseBeforeUpdateSchema")
-            {
-                // But analyze their body for method calls to seed methods
-                if (method.Body != null)
-                {
-                    AnalyzeUpdateMethod(classDecl, method.Body, seedData, options);
-                }
+        foreach (var method in methods)
+        {
+            Visit(method);
+
+            if (!IsUpdateMethod(method.Identifier.Text))
                 continue;
-            }
 
-            // Analyze methods that create objects
-            if (method.Body != null && HasObjectCreation(method.Body))
-            {
-                var seed = ExtractSeedFromMethod(method, options);
-                if (seed != null && seed.Records.Count > 0)
-                    AddSeed(seedData, seed);
-            }
+            foreach (var name in CalledNames(method))
+            foreach (var target in methods.Where(m => m.Identifier.Text == name))
+                Visit(target);
         }
 
         return seedData;
     }
+
+    private static bool IsUpdateMethod(string name) =>
+        name is "UpdateDatabaseAfterUpdateSchema" or "UpdateDatabaseBeforeUpdateSchema";
+
+    /// <summary>The names of the methods an update method calls, in call order.</summary>
+    private static IEnumerable<string> CalledNames(MethodDeclarationSyntax method) =>
+        ((SyntaxNode?)method.Body ?? method.ExpressionBody)?.DescendantNodes()
+            .OfType<InvocationExpressionSyntax>()
+            .Select(i => i.Expression switch
+            {
+                IdentifierNameSyntax identifier => identifier.Identifier.Text,
+                MemberAccessExpressionSyntax member => member.Name.Identifier.Text,
+                _ => null,
+            })
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+        ?? [];
 
     /// <summary>
     /// Finds the blocks that run only when an existing database is upgraded.
@@ -186,99 +213,89 @@ public class UpdaterAnalyzer
         return single;
     }
 
-    /// <summary>
-    /// Traverses update entry points to find delegated seed methods.
-    /// </summary>
-    private static void AnalyzeUpdateMethod(ClassDeclarationSyntax classDecl, BlockSyntax body, List<ExtractedSeedData> seedData, ExtractionOptions options)
+    /// <summary>One object a seed method creates, and which of its values came from a parameter.</summary>
+    private sealed record Created(string EntityType, SeedRecord Record, Dictionary<string, string> FromParameter)
     {
-        // Find method invocations within UpdateDatabaseAfterUpdateSchema
-        var invocations = body.DescendantNodes()
-            .OfType<InvocationExpressionSyntax>()
-            .Select(i => i.Expression.ToString())
-            .Distinct();
-
-        foreach (var invocation in invocations)
-        {
-            var methodName = invocation.Contains('.') ? invocation.Split('.').Last() : invocation;
-
-            var targetMethod = classDecl.Members.OfType<MethodDeclarationSyntax>()
-                .FirstOrDefault(m => m.Identifier.Text == methodName);
-
-            if (targetMethod?.Body != null && HasObjectCreation(targetMethod.Body))
-            {
-                var seed = ExtractSeedFromMethod(targetMethod, options);
-                if (seed != null && seed.Records.Count > 0)
-                    AddSeed(seedData, seed);
-            }
-        }
+        public Created(string entityType) : this(entityType, new SeedRecord(), new Dictionary<string, string>(StringComparer.Ordinal)) { }
     }
 
+    /// <summary>What a caller passes for a parameter that is not a literal.</summary>
+    private const string SetByTheCaller = "set by the caller";
+
     /// <summary>
-    /// Adds a seed method unless it has already been recorded.
+    /// The seeds one method creates.
     /// </summary>
     /// <remarks>
-    /// A seed method is reached twice: once by following the calls out of
-    /// <c>UpdateDatabaseAfterUpdateSchema</c>, and once by the sweep over every method in the
-    /// class. Without this guard each one is reported twice, so documentation claims an
-    /// application seeds twice as many things as it does — and the duplicate is a perfect copy,
-    /// which makes it read like two genuinely separate operations.
+    /// A named method is one seed, whatever it creates. An update method is read for what it creates
+    /// itself — one seed per class, named after that class: a generated updater creates its roles
+    /// inline, and five updaters each reporting "Update Database After Update Schema" said nothing.
     /// </remarks>
-    private static void AddSeed(List<ExtractedSeedData> seedData, ExtractedSeedData seed)
+    private static List<ExtractedSeedData> SeedsOf(ClassDeclarationSyntax classDecl, MethodDeclarationSyntax method, ExtractionOptions options, HashSet<string>? known)
     {
-        if (seedData.Any(existing => existing.MethodName == seed.MethodName))
-            return;
+        var created = WithCallerValues(classDecl, method, Creations(classDecl, method, known));
+        if (created.Count == 0)
+            return [];
 
-        seedData.Add(seed);
+        var name = method.Identifier.Text;
+        var source = options.IncludeSourceCode ? method.Body!.ToString() : string.Empty;
+
+        if (IsUpdateMethod(name))
+        {
+            return created
+                .GroupBy(c => c.EntityType, StringComparer.Ordinal)
+                .Select(group => new ExtractedSeedData
+                {
+                    EntityType = group.Key,
+                    MethodName = name,
+                    UpdaterClass = classDecl.Identifier.Text,
+                    Description = InferDescriptionFromMethodName(group.Key),
+                    RawSourceCode = source,
+                    Records = group.Select(c => c.Record).ToList(),
+                })
+                .ToList();
+        }
+
+        return
+        [
+            new ExtractedSeedData
+            {
+                EntityType = created[0].EntityType,
+                MethodName = name,
+                UpdaterClass = classDecl.Identifier.Text,
+                Description = InferDescriptionFromMethodName(name),
+                RawSourceCode = source,
+                Records = created.Select(c => c.Record).ToList(),
+            },
+        ];
     }
 
     /// <summary>
-    /// Extracts one seed-data block from a method body.
+    /// The objects a method body creates, in source order: <c>new T(session)</c>,
+    /// <c>ObjectSpace.CreateObject&lt;T&gt;()</c> and <c>userManager.CreateUser&lt;T&gt;(…)</c>.
     /// </summary>
-    private static ExtractedSeedData? ExtractSeedFromMethod(MethodDeclarationSyntax method, ExtractionOptions options)
+    private static List<Created> Creations(ClassDeclarationSyntax classDecl, MethodDeclarationSyntax method, HashSet<string>? known)
     {
-        if (method.Body == null) return null;
+        var body = method.Body!;
+        var parameters = method.ParameterList.Parameters.Select(p => p.Identifier.Text).ToHashSet(StringComparer.Ordinal);
+        var found = new List<(int Position, Created Object)>();
 
-        var seed = new ExtractedSeedData
+        // new Ward(session) { ... }
+        foreach (var creation in body.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
         {
-            MethodName = method.Identifier.Text,
-            Description = InferDescriptionFromMethodName(method.Identifier.Text),
-        };
-
-        if (options.IncludeSourceCode)
-            seed.RawSourceCode = method.Body.ToString();
-
-        // Find object creation expressions (new TipoEmpleado(session) { ... })
-        var objectCreations = method.Body.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>();
-
-        foreach (var creation in objectCreations)
-        {
-            var typeName = creation.Type.ToString();
-
-            // Skip infrastructure types
-            if (typeName.Contains("PermissionPolicy") || typeName.Contains("ApplicationUser"))
-            {
-                seed.EntityType = typeName;
+            if (!IsSeeded(creation, known))
                 continue;
-            }
 
-            seed.EntityType = typeName;
-            SeedRecord? initialized = null;
+            var typeName = SimpleName(creation.Type);
+            Created? initialized = null;
 
             if (creation.Initializer != null)
             {
-                var record = new SeedRecord();
-                foreach (var expression in creation.Initializer.Expressions)
-                {
-                    if (expression is AssignmentExpressionSyntax assignment)
-                    {
-                        var propName = assignment.Left.ToString();
-                        var propValue = SyntaxLiteral.ValueOf(assignment.Right);
-                        record.PropertyValues[propName] = propValue;
-                    }
-                }
-                if (record.PropertyValues.Count > 0)
-                    seed.Records.Add(initialized = record);
+                var record = new Created(typeName);
+                foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+                    Assign(record, assignment.Left.ToString(), assignment.Right, parameters);
+
+                if (record.Record.PropertyValues.Count > 0)
+                    found.Add((creation.SpanStart, initialized = record));
             }
 
             // Also check for property assignments after creation: var x = new Type(); x.Prop = value;
@@ -298,90 +315,286 @@ public class UpdaterAnalyzer
                 _ => null,
             };
 
-            if (variableName != null)
-            {
-                // This creation's own record: the one its initializer started, else a new one. Taking
-                // the last record made two sibling blocks' `var role = new Role(session)` one record.
-                var record = initialized ?? new SeedRecord();
+            if (variableName == null)
+                continue;
 
-                // Find subsequent property assignments
-                var block = ScopeOf(creation, variableName, method.Body);
-                var assignments = block.DescendantNodes()
-                    .OfType<AssignmentExpressionSyntax>()
-                    .Where(a => a.Left is MemberAccessExpressionSyntax mae
-                                && mae.Expression.ToString() == variableName);
+            // This creation's own record: the one its initializer started, else a new one. Taking
+            // the last record made two sibling blocks' `var role = new Role(session)` one record.
+            var own = initialized ?? new Created(typeName);
+            AssignFollowing(own, creation, variableName, body, parameters);
 
-                foreach (var assignment in assignments)
-                {
-                    if (assignment.Left is MemberAccessExpressionSyntax mae)
-                    {
-                        record.PropertyValues[mae.Name.ToString()] = SyntaxLiteral.ValueOf(assignment.Right);
-                    }
-                }
-
-                if (record != initialized && record.PropertyValues.Count > 0)
-                    seed.Records.Add(record);
-            }
+            if (own != initialized && own.Record.PropertyValues.Count > 0)
+                found.Add((creation.SpanStart, own));
         }
 
-        ExtractObjectSpaceCreations(method.Body, seed);
+        foreach (var invocation in body.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            var generic = invocation.Expression switch
+            {
+                MemberAccessExpressionSyntax member => member.Name as GenericNameSyntax,
+                GenericNameSyntax plain => plain,
+                _ => null,
+            };
 
-        return seed;
+            var typeArgument = generic?.TypeArgumentList.Arguments.FirstOrDefault();
+            if (typeArgument is null)
+                continue;
+
+            var record = new Created(SimpleName(typeArgument));
+
+            // The modern style: ObjectSpace.CreateObject<Customer>(). The scan above only recognizes
+            // `new Customer(session)`, and such an application was reported as having no seed data
+            // at all. The result is either declared (var x = ...) or assigned to an existing local
+            // (x = ...), and both forms appear in the same updater when a method checks for an
+            // existing record before creating one.
+            if (generic!.Identifier.Text == "CreateObject" && invocation.Expression is MemberAccessExpressionSyntax)
+            {
+                var variableName =
+                    invocation.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.Text
+                    ?? invocation.Ancestors().OfType<AssignmentExpressionSyntax>().FirstOrDefault()?.Left.ToString();
+
+                if (string.IsNullOrWhiteSpace(variableName))
+                    continue;
+
+                AssignFollowing(record, invocation, variableName, body, parameters);
+            }
+
+            // Users: userManager.CreateUser<ApplicationUser>(ObjectSpace, "Admin", "", user => ...),
+            // the way the project template and every generator seeds them.
+            else if (generic.Identifier.Text == "CreateUser" && UserNameArgument(invocation, classDecl) is { } userName)
+            {
+                Assign(record, "UserName", userName, parameters);
+            }
+
+            if (record.Record.PropertyValues.Count > 0)
+                found.Add((invocation.SpanStart, record));
+        }
+
+        return found.OrderBy(f => f.Position).Select(f => f.Object).ToList();
+    }
+
+    /// <summary>Records <c>variable.Property = value</c> within the variable's scope.</summary>
+    private static void AssignFollowing(Created record, SyntaxNode creation, string variableName, BlockSyntax body, HashSet<string> parameters)
+    {
+        foreach (var assignment in ScopeOf(creation, variableName, body).DescendantNodes().OfType<AssignmentExpressionSyntax>())
+        {
+            if (assignment.Left is MemberAccessExpressionSyntax member && member.Expression.ToString() == variableName)
+                Assign(record, member.Name.ToString(), assignment.Right, parameters);
+        }
+    }
+
+    /// <summary>Sets a value, remembering when it is the method's own parameter.</summary>
+    private static void Assign(Created record, string property, ExpressionSyntax value, HashSet<string> parameters)
+    {
+        record.Record.PropertyValues[property] = SyntaxLiteral.ValueOf(value);
+
+        if (value is IdentifierNameSyntax identifier && parameters.Contains(identifier.Identifier.Text))
+            record.FromParameter[property] = identifier.Identifier.Text;
+        else
+            record.FromParameter.Remove(property);
     }
 
     /// <summary>
-    /// Reads seed records created through <c>ObjectSpace.CreateObject&lt;T&gt;()</c>.
+    /// Whether a <c>new T(…)</c> creates something the updater seeds.
     /// </summary>
     /// <remarks>
-    /// The scan above only recognizes <c>new Customer(session)</c>. That is the older
-    /// Session-based style; a modern updater works against <c>IObjectSpace</c> and writes
-    /// <c>ObjectSpace.CreateObject&lt;Customer&gt;()</c>, which is an invocation rather than an
-    /// object creation and so was invisible. Such an application was reported as having no seed
-    /// data at all — the tool describing the absence of something plainly present in the source.
+    /// Every <c>new</c> in a seed method used to count, so a role looked up with
+    /// <c>FindObject&lt;PermissionPolicyRole&gt;(new BinaryOperator("Name", name))</c> made the seed a
+    /// <c>BinaryOperator</c>. What counts is a business class of the module, one of XAF's security
+    /// classes (never in the module's own list), or an XPO object built on a session — kept so a
+    /// class the entity pass missed still reads.
     /// </remarks>
-    private static void ExtractObjectSpaceCreations(BlockSyntax body, ExtractedSeedData seed)
+    private static bool IsSeeded(ObjectCreationExpressionSyntax creation, HashSet<string>? known)
     {
-        var creations = body.DescendantNodes()
+        if (known is null)
+            return true;
+
+        var name = SimpleName(creation.Type);
+        if (known.Contains(name) || name.StartsWith("PermissionPolicy", StringComparison.Ordinal))
+            return true;
+
+        // ponytail: XPO's persistent constructor by argument name; a session held in a variable of another name is missed.
+        return creation.ArgumentList?.Arguments is [var only]
+               && only.Expression.ToString() is var text
+               && (text.EndsWith("Session", StringComparison.OrdinalIgnoreCase)
+                   || text.EndsWith("UnitOfWork", StringComparison.OrdinalIgnoreCase)
+                   || text == "uow");
+    }
+
+    /// <summary>A type's own name: <c>global::App.Module.ApplicationUser</c> is <c>ApplicationUser</c>.</summary>
+    private static string SimpleName(TypeSyntax type) => type switch
+    {
+        QualifiedNameSyntax qualified => SimpleName(qualified.Right),
+        AliasQualifiedNameSyntax alias => SimpleName(alias.Name),
+        SimpleNameSyntax simple => simple.Identifier.Text,
+        _ => type.ToString(),
+    };
+
+    /// <summary>
+    /// The user name a <c>UserManager.CreateUser&lt;T&gt;</c> call creates, or null for the overload
+    /// that takes an <c>IPrincipal</c>.
+    /// </summary>
+    /// <remarks>
+    /// The overloads are <c>(objectSpace, userName, password, customizeUser)</c>,
+    /// <c>(objectSpace, userName, loginProviderName, providerUserKey, customizeUser, autoCommit)</c>
+    /// and <c>(objectSpace, principal, customizeUser, autoCommit)</c>. Named arguments settle it; so
+    /// does a third argument that is a string, since only the principal overload has a delegate or a
+    /// flag there.
+    /// </remarks>
+    private static ExpressionSyntax? UserNameArgument(InvocationExpressionSyntax invocation, ClassDeclarationSyntax classDecl)
+    {
+        var arguments = invocation.ArgumentList.Arguments;
+
+        ExpressionSyntax? Named(string name) =>
+            arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.Text == name)?.Expression;
+
+        if (Named("principal") is not null)
+            return null;
+
+        if (Named("userName") is { } named)
+            return named;
+
+        // A positional argument sits in its own slot, also after a named one written in position:
+        // `CreateUser<T>(objectSpace: os, "Admin", "", …)`.
+        var positional = arguments
+            .Select((argument, slot) => (argument, slot))
+            .Where(a => a.argument.NameColon is null)
+            .ToDictionary(a => a.slot, a => a.argument.Expression);
+
+        if (!positional.TryGetValue(1, out var second))
+            return null;
+
+        var byUserName = Named("password") is not null || Named("loginProviderName") is not null || Named("providerUserKey") is not null
+                         || (positional.TryGetValue(2, out var third) && !IsCustomization(third, classDecl));
+
+        return byUserName ? second : null;
+    }
+
+    /// <summary>A delegate or a flag: what the principal overload takes after the principal.</summary>
+    private static bool IsCustomization(ExpressionSyntax expression, ClassDeclarationSyntax classDecl) => expression switch
+    {
+        AnonymousFunctionExpressionSyntax => true,
+        LiteralExpressionSyntax literal => literal.IsKind(SyntaxKind.NullLiteralExpression)
+                                           || literal.IsKind(SyntaxKind.TrueLiteralExpression)
+                                           || literal.IsKind(SyntaxKind.FalseLiteralExpression),
+        IdentifierNameSyntax method => IsMethodOf(method, classDecl),
+        MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name: IdentifierNameSyntax method } => IsMethodOf(method, classDecl),
+        _ => false,
+    };
+
+    private static bool IsMethodOf(IdentifierNameSyntax name, ClassDeclarationSyntax classDecl) =>
+        classDecl.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.Text == name.Identifier.Text);
+
+    /// <summary>
+    /// Fills in the values a helper receives from its callers: one record per call.
+    /// </summary>
+    /// <remarks>
+    /// <c>SeedRole("Administrators", …)</c> fourteen times over one helper that does
+    /// <c>role.Name = name</c> read as one role called <c>name</c>. Each call in the updater is
+    /// bound to the helper's declaration the way the compiler would — by position, name and default
+    /// — and a literal argument becomes the value. Anything else, a call that fits more than one
+    /// overload, or a helper nobody in the class calls: "set by the caller". A record whose values
+    /// are all its own is created on every call too, but is listed once.
+    /// </remarks>
+    private static List<Created> WithCallerValues(ClassDeclarationSyntax classDecl, MethodDeclarationSyntax method, List<Created> created)
+    {
+        if (created.All(c => c.FromParameter.Count == 0))
+            return created;
+
+        var name = method.Identifier.Text;
+        var overloads = classDecl.Members.OfType<MethodDeclarationSyntax>().Where(m => m.Identifier.Text == name).ToList();
+
+        var calls = classDecl.DescendantNodes()
             .OfType<InvocationExpressionSyntax>()
-            .Where(i => i.Expression is MemberAccessExpressionSyntax
+            .Where(call => call.Expression switch
             {
-                Name: GenericNameSyntax { Identifier.Text: "CreateObject" }
-            });
+                IdentifierNameSyntax identifier => identifier.Identifier.Text == name,
+                MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name: IdentifierNameSyntax member } => member.Identifier.Text == name,
+                _ => false,
+            })
+            .Select(call => (Call: call, Arguments: Bind(call.ArgumentList, method.ParameterList)))
+            .Where(bound => bound.Arguments is not null)
+            .Select(bound => overloads.Count(o => Bind(bound.Call.ArgumentList, o.ParameterList) is not null) == 1 ? bound.Arguments : null)
+            .ToList();
 
-        foreach (var creation in creations)
+        var result = new List<Created>();
+
+        foreach (var record in created)
         {
-            var generic = (GenericNameSyntax)((MemberAccessExpressionSyntax)creation.Expression).Name;
-            var typeName = generic.TypeArgumentList.Arguments.FirstOrDefault()?.ToString();
+            if (record.FromParameter.Count == 0)
+                result.Add(record);
+            else if (calls.Count == 0)
+                result.Add(Substituted(record, null));
+            else
+                result.AddRange(calls.Select(arguments => Substituted(record, arguments)));
+        }
 
-            if (string.IsNullOrWhiteSpace(typeName))
-                continue;
+        return result;
+    }
 
-            seed.EntityType = typeName;
+    private static Created Substituted(Created record, Dictionary<string, ExpressionSyntax>? arguments)
+    {
+        var copy = new Created(record.EntityType);
 
-            // The result is either declared (var x = ...) or assigned to an existing local
-            // (x = ...), and both forms appear in the same updater when a method checks for an
-            // existing record before creating one.
-            var variableName =
-                creation.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.Text
-                ?? (creation.Ancestors().OfType<AssignmentExpressionSyntax>().FirstOrDefault()?.Left.ToString());
+        foreach (var (property, value) in record.Record.PropertyValues)
+        {
+            copy.Record.PropertyValues[property] = !record.FromParameter.TryGetValue(property, out var parameter)
+                ? value
+                : arguments?.GetValueOrDefault(parameter) is { } argument && IsLiteral(argument)
+                    ? SyntaxLiteral.ValueOf(argument)
+                    : SetByTheCaller;
+        }
 
-            if (string.IsNullOrWhiteSpace(variableName))
-                continue;
+        return copy;
+    }
 
-            var record = new SeedRecord();
+    private static bool IsLiteral(ExpressionSyntax expression) => expression switch
+    {
+        LiteralExpressionSyntax => true,
+        InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "nameof" } } => true,
+        BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression) => IsLiteral(binary.Left) && IsLiteral(binary.Right),
+        _ => false,
+    };
 
-            foreach (var assignment in ScopeOf(creation, variableName, body).DescendantNodes().OfType<AssignmentExpressionSyntax>())
+    /// <summary>
+    /// Binds a call's arguments to a declaration's parameters, or null when the call cannot be to it.
+    /// </summary>
+    private static Dictionary<string, ExpressionSyntax>? Bind(ArgumentListSyntax arguments, ParameterListSyntax declaration)
+    {
+        var parameters = declaration.Parameters;
+        var isParams = parameters.Count > 0 && parameters[^1].Modifiers.Any(SyntaxKind.ParamsKeyword);
+        var bound = new Dictionary<string, ExpressionSyntax>(StringComparer.Ordinal);
+
+        for (var i = 0; i < arguments.Arguments.Count; i++)
+        {
+            var argument = arguments.Arguments[i];
+            var name = argument.NameColon?.Name.Identifier.Text
+                       ?? (i < parameters.Count ? parameters[i].Identifier.Text : null);
+
+            // Extra positional arguments go into a trailing params array; anywhere else they don't fit.
+            if (name is null)
             {
-                if (assignment.Left is MemberAccessExpressionSyntax member
-                    && member.Expression.ToString() == variableName)
-                {
-                    record.PropertyValues[member.Name.ToString()] = SyntaxLiteral.ValueOf(assignment.Right);
-                }
+                if (isParams)
+                    continue;
+                return null;
             }
 
-            if (record.PropertyValues.Count > 0)
-                seed.Records.Add(record);
+            if (!parameters.Any(p => p.Identifier.Text == name) || !bound.TryAdd(name, argument.Expression))
+                return null;
         }
+
+        foreach (var parameter in parameters)
+        {
+            if (bound.ContainsKey(parameter.Identifier.Text))
+                continue;
+
+            if (parameter.Default is { } defaultValue)
+                bound[parameter.Identifier.Text] = defaultValue.Value;
+            else if (parameter != parameters[^1] || !isParams)
+                return null;
+        }
+
+        return bound;
     }
 
     /// <summary>
@@ -407,22 +620,6 @@ public class UpdaterAnalyzer
         }
 
         return body;
-    }
-
-    /// <summary>
-    /// Checks whether a method body creates persistent objects, in either supported style.
-    /// </summary>
-    private static bool HasObjectCreation(BlockSyntax body)
-    {
-        if (body.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Any())
-            return true;
-
-        return body.DescendantNodes()
-            .OfType<InvocationExpressionSyntax>()
-            .Any(i => i.Expression is MemberAccessExpressionSyntax
-            {
-                Name: GenericNameSyntax { Identifier.Text: "CreateObject" }
-            });
     }
 
     /// <summary>
