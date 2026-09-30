@@ -105,6 +105,10 @@ internal static class SampleProjects
     public static string PartialLayoutPath =>
         Path.Combine(FixturesRoot, "PartialLayoutSolution", "Driving.Module");
 
+    /// <summary>Path to the module that registers several updaters.</summary>
+    public static string UpdatersPath =>
+        Path.Combine(FixturesRoot, "UpdatersSolution", "Clinic.Module");
+
     /// <summary>Path to the module with a pre-SDK project file beside the SDK one that replaced it.</summary>
     public static string MigratedProjectPath =>
         Path.Combine(FixturesRoot, "MigratedProjectSolution", "Ledger.Module");
@@ -201,6 +205,7 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyNullableNavigationEf = new(() => Extract(NullableNavigationEfPath));
     private static readonly Lazy<ExtractedProject> LazyNullableNavigationXpo = new(() => Extract(NullableNavigationXpoPath));
     private static readonly Lazy<ExtractedProject> LazyPartialLayout = new(() => Extract(PartialLayoutPath));
+    private static readonly Lazy<ExtractedProject> LazyUpdaters = new(() => Extract(UpdatersPath));
     private static readonly Lazy<ExtractedProject> LazyMigratedProject = new(() => Extract(MigratedProjectPath));
 
     /// <summary>The XPO sample: Customer, Order, OrderLine, one controller, seed data, xafml.</summary>
@@ -316,6 +321,13 @@ internal static class SampleProjects
     /// that only adds an interface for its screens.
     /// </summary>
     public static ExtractedProject PartialLayout => LazyPartialLayout.Value;
+
+    /// <summary>
+    /// A clinic whose module registers six updaters — the template's, one for roles, one for wards,
+    /// two sharing a file, and one that creates its roles inline — and keeps another its project file
+    /// removes.
+    /// </summary>
+    public static ExtractedProject Updaters => LazyUpdaters.Value;
 
     /// <summary>
     /// A ledger application mid-migration: a folder-named pre-SDK project file that lists its sources
