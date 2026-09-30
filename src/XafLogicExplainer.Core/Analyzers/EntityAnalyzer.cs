@@ -314,7 +314,7 @@ public class EntityAnalyzer : IEntityAnalyzer
         }
         else
         {
-            relatedEntity = typeName;
+            relatedEntity = ReferencedClassName(typeName);
             relType = RelationshipType.ManyToOne;
         }
 
@@ -359,13 +359,13 @@ public class EntityAnalyzer : IEntityAnalyzer
                         });
                     }
                 }
-                else if (entityNames.Contains(prop.TypeName))
+                else if (entityNames.Contains(ReferencedClassName(prop.TypeName)))
                 {
                     // Reference nav property -> ManyToOne
                     entity.Relationships.Add(new ExtractedRelationship
                     {
                         PropertyName = prop.Name,
-                        RelatedEntity = prop.TypeName,
+                        RelatedEntity = ReferencedClassName(prop.TypeName),
                         Type = RelationshipType.ManyToOne,
                         IsAggregated = false
                     });
@@ -1702,6 +1702,13 @@ public class EntityAnalyzer : IEntityAnalyzer
         return normalized.Equals(shortName, StringComparison.Ordinal)
                || normalized.EndsWith($".{shortName}");
     }
+
+    /// <summary>
+    /// The class a reference is to, without the nullable annotation: <c>Student?</c> is a
+    /// <c>Student</c> that may be empty, not a different type. Trimmed again after, because
+    /// <c>Student ?</c> is valid C# and the type is kept as written.
+    /// </summary>
+    private static string ReferencedClassName(string typeName) => typeName.Trim().TrimEnd('?').TrimEnd();
 
     private static string ExtractGenericArgument(string typeName)
     {

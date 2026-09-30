@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A to-one navigation written with a nullable annotation was not a relationship.** The type of
+  `public virtual Student? Student` was compared with the application's class names question mark
+  included, so it matched none of them. With nullable reference types on, every reference that may be
+  empty is written that way, and the index showed only the collection side of the association: what a
+  lesson belongs to had no answer. An XPO `[Association]` written the same way named the class
+  `Customer?`. On four real EF Core applications this was 117 of 298 relationships, and on the largest
+  73 of 183. The property keeps its type as written.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.
