@@ -578,7 +578,7 @@ public class ControllerAnalyzer : IControllerAnalyzer
             || typeName.Contains("Action") && !typeName.Contains("EventArgs");
     }
 
-    private static string GetNamespace(ClassDeclarationSyntax classDecl)
+    internal static string GetNamespace(ClassDeclarationSyntax classDecl)
     {
         var nsDecl = classDecl.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
         return nsDecl?.Name.ToString() ?? string.Empty;

@@ -213,6 +213,10 @@ public class LogicExtractor : ILogicExtractor
         //    extends. Needs every controller parsed first, so it cannot live in the analyzer.
         ControllerTargetingResolver.Resolve(project.Controllers, catalog);
 
+        // 9.5 Logic attached to Object Space events from outside the business classes. After 9,
+        //     because a controller's (inherited) target is part of the evidence.
+        ObjectSpaceHandlerAnalyzer.Analyze(project, projectPath, options);
+
         // 10. Enumerate the screens, and work out what runs on each. Last, because it is a view of
         //     everything above it rather than a new reading of the source.
         project.Views = ViewInventory.Build(project);

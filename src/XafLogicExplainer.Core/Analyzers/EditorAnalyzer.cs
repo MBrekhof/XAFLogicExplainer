@@ -312,7 +312,7 @@ public class EditorAnalyzer
         return EditorKind.Unknown;
     }
 
-    private static IEnumerable<string> EnumerateSource(string sourceDirectory)
+    internal static IEnumerable<string> EnumerateSource(string sourceDirectory)
     {
         IEnumerable<string> files;
         var removed = CompileExclusions.For(sourceDirectory);

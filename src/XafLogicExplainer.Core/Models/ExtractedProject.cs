@@ -51,6 +51,12 @@ public class ExtractedProject
     public List<ExtractedController> Controllers { get; set; } = [];
 
     /// <summary>
+    /// Handlers that controllers and other classes attach to Object Space events — save-time logic
+    /// that lives outside the business classes it concerns.
+    /// </summary>
+    public List<ExtractedObjectSpaceHandler> ObjectSpaceHandlers { get; set; } = [];
+
+    /// <summary>
     /// Navigation groups derived from entity metadata.
     /// </summary>
     public List<ExtractedNavigationItem> Navigation { get; set; } = [];

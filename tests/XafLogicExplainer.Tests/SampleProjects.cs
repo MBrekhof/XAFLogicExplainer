@@ -117,6 +117,10 @@ internal static class SampleProjects
     public static string LifecycleXpoPath =>
         Path.Combine(FixturesRoot, "LifecycleXpoSolution", "Depot.Module");
 
+    /// <summary>Path to the module whose controllers and plain classes subscribe to Object Space events.</summary>
+    public static string ObjectSpaceHandlerPath =>
+        Path.Combine(FixturesRoot, "ObjectSpaceHandlerSolution", "Shop.Module");
+
     /// <summary>Path to the module with a pre-SDK project file beside the SDK one that replaced it.</summary>
     public static string MigratedProjectPath =>
         Path.Combine(FixturesRoot, "MigratedProjectSolution", "Ledger.Module");
@@ -216,6 +220,7 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyUpdaters = new(() => Extract(UpdatersPath));
     private static readonly Lazy<ExtractedProject> LazyLifecycle = new(() => Extract(LifecyclePath));
     private static readonly Lazy<ExtractedProject> LazyLifecycleXpo = new(() => Extract(LifecycleXpoPath));
+    private static readonly Lazy<ExtractedProject> LazyObjectSpaceHandlers = new(() => Extract(ObjectSpaceHandlerPath));
     private static readonly Lazy<ExtractedProject> LazyMigratedProject = new(() => Extract(MigratedProjectPath));
 
     /// <summary>The XPO sample: Customer, Order, OrderLine, one controller, seed data, xafml.</summary>
@@ -351,6 +356,13 @@ internal static class SampleProjects
     public static ExtractedProject LifecycleXpo => LazyLifecycleXpo.Value;
 
     /// <summary>
+    /// A shop whose save-time logic lives outside its business classes: controllers and a plain class
+    /// subscribing to Committing, ObjectChanged and the other Object Space events, in the module and in
+    /// the Blazor project beside it.
+    /// </summary>
+    public static ExtractedProject ObjectSpaceHandlers => LazyObjectSpaceHandlers.Value;
+
+    /// <summary>
     /// A ledger application mid-migration: a folder-named pre-SDK project file that lists its sources
     /// by hand and misses one added since, beside the SDK project the application is built from.
     /// </summary>
@@ -404,6 +416,10 @@ internal static class SampleProjects
         ?? throw new InvalidOperationException(
             $"The fixture has no controller '{className}'. Extracted: " +
             string.Join(", ", project.Controllers.Select(c => c.ClassName)));
+
+    /// <summary>The Object Space handlers one class declares, in the order they were found.</summary>
+    public static List<ExtractedObjectSpaceHandler> Handlers(this ExtractedProject project, string declaringClass) =>
+        project.ObjectSpaceHandlers.Where(h => h.DeclaringClass == declaringClass).ToList();
 
     /// <summary>Finds one property by name, failing the test clearly when it is missing.</summary>
     public static ExtractedProperty Property(this ExtractedEntity entity, string name) =>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Fixture only. Never built: it is input to the extractor, which reads it as text.
+    Logic attached to an Object Space from outside the business class: controllers and a plain
+    class subscribing to Committing, ObjectChanged and the other Object Space events.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DevExpress.ExpressApp.EFCore" Version="25.2.4" />
+  </ItemGroup>
+
+</Project>
