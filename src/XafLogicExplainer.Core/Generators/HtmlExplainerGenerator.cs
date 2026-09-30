@@ -900,17 +900,18 @@ public sealed class HtmlExplainerGenerator
     {
         var withRules = project.Entities
             .Where(e => e.ValidationRules.Count > 0 || e.AppearanceRules.Count > 0
-                     || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias)))
+                     || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias))
+                     || e.Lifecycle.Count > 0)
             .OrderBy(e => e.ClassName, StringComparer.Ordinal)
             .ToList();
 
         sb.AppendLine("<section id=\"rules\">");
         sb.AppendLine("  <h2>What the application enforces</h2>");
-        sb.AppendLine("  <p class=\"lede\">Validation the user will hit, behavior that changes with the data, and figures the database computes.</p>");
+        sb.AppendLine("  <p class=\"lede\">Validation the user will hit, behavior that changes with the data, figures the database computes, and what a class does when one of its objects is created, loaded or saved.</p>");
 
         if (withRules.Count == 0)
         {
-            sb.AppendLine("  <p class=\"empty\">No validation, appearance rules or calculated properties are declared.</p>");
+            sb.AppendLine("  <p class=\"empty\">No validation, appearance rules, calculated properties or methods run on create, load or save are declared.</p>");
             sb.AppendLine("</section>");
             return;
         }
@@ -920,7 +921,8 @@ public sealed class HtmlExplainerGenerator
             var calculated = entity.Properties.Where(p => !string.IsNullOrWhiteSpace(p.PersistentAlias)).ToList();
             var haystack = Haystack(entity.ClassName,
                 string.Join(" ", entity.ValidationRules.Select(r => r.RuleType + " " + r.MessageTemplate)),
-                string.Join(" ", entity.AppearanceRules.Select(r => r.Id + " " + r.Criteria)));
+                string.Join(" ", entity.AppearanceRules.Select(r => r.Id + " " + r.Criteria)),
+                string.Join(" ", entity.Lifecycle.Select(h => h.MethodName + " " + string.Join(" ", h.AssignedProperties))));
 
             sb.AppendLine($"  <article class=\"card\" data-search=\"{haystack}\">");
             sb.AppendLine($"    <div class=\"card__head\"><span class=\"card__name\">{E(entity.ClassName)}</span></div>");
@@ -968,6 +970,29 @@ public sealed class HtmlExplainerGenerator
                 sb.AppendLine("    <table><thead><tr><th>Calculated</th><th>Expression</th></tr></thead><tbody>");
                 foreach (var property in calculated)
                     sb.AppendLine($"      <tr><td class=\"mono\">{E(property.Name)}</td><td><code class=\"crit\">{E(property.PersistentAlias)}</code></td></tr>");
+                sb.AppendLine("    </tbody></table>");
+            }
+
+            if (entity.Lifecycle.Count > 0)
+            {
+                // What the method assigns, not when: a condition around an assignment is not read.
+                sb.AppendLine("    <table><thead><tr><th>Runs</th><th>Method</th><th>Assigns</th></tr></thead><tbody>");
+                foreach (var hook in entity.Lifecycle.OrderByDescending(h => h.InheritedFrom is null))
+                {
+                    var declarer = hook.InheritedFrom is { Length: > 0 } from
+                        ? $" <span class=\"t\">from <span class=\"mono\">{E(from)}</span></span>"
+                        : "";
+                    var at = Cite(project, hook.FilePath, hook.Line) is { Length: > 0 } where
+                        ? $" <span class=\"mono t\">{where}</span>"
+                        : "";
+                    var assigns = hook.AssignedProperties.Count > 0
+                        ? E(string.Join(", ", hook.AssignedProperties))
+                        : "<span class=\"empty\">—</span>";
+
+                    sb.AppendLine($"      <tr><td class=\"t\">{E(LifecycleHooks.When(hook.Trigger))}</td>" +
+                                  $"<td><span class=\"mono\">{E(hook.MethodName)}</span>{declarer}{at}</td>" +
+                                  $"<td class=\"mono\">{assigns}</td></tr>");
+                }
                 sb.AppendLine("    </tbody></table>");
             }
 

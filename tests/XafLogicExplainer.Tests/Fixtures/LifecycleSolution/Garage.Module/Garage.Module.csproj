@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Fixture only. Never built: it is input to the extractor, which reads it as text.
+    Business classes that run code when an object is created, loaded or saved, in every shape XAF
+    documents, and one base class that does so from a referenced library outside this solution folder.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\LifecycleLibrary\Tracking.Core\Tracking.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DevExpress.ExpressApp.EFCore" Version="25.2.4" />
+  </ItemGroup>
+
+</Project>

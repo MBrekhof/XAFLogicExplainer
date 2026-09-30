@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
+using XafLogicExplainer.Core.Generators;
 using XafLogicExplainer.Core.Models;
 
 namespace XafLogicExplainer.Mcp.Tools;
@@ -35,8 +36,9 @@ public sealed class XafDetailTools
     [McpServerTool(Name = "xaf_entity")]
     [Description(
         "Full detail of one business entity: every property with its type and attributes, " +
-        "relationships to other entities, validation rules, appearance rules, and calculated " +
-        "property expressions. Use before writing or changing any code that touches an entity.")]
+        "relationships to other entities, validation rules, appearance rules, calculated " +
+        "property expressions, and the methods it runs when an object is created, loaded or saved. " +
+        "Use before writing or changing any code that touches an entity.")]
     public async Task<string> EntityAsync(
         [Description("Entity class name, e.g. 'Invoice'. Case-insensitive.")] string name,
         [Description("Project name, when several are configured.")] string? project = null,
@@ -244,8 +246,11 @@ public sealed class XafDetailTools
     [McpServerTool(Name = "xaf_rules")]
     [Description(
         "The business rules the application enforces: validation rules with their messages and " +
-        "conditions, conditional appearance rules, and calculated properties. Use when asked what " +
-        "the system requires, forbids, or computes. Optionally narrowed to one entity.")]
+        "conditions, conditional appearance rules, calculated properties, and the methods a class " +
+        "runs when an object is created, loaded or saved (OnCreated, OnSaving, AfterConstruction). " +
+        "Use when asked what the system requires, forbids, computes, or does on save. Logic attached " +
+        "from outside a class, such as a controller handling ObjectSpace.Committing, is not included. " +
+        "Optionally narrowed to one entity.")]
     public async Task<string> RulesAsync(
         [Description("Restrict to one entity. Omit for every rule in the application.")] string? entity = null,
         [Description("Project name, when several are configured.")] string? project = null,
@@ -271,17 +276,30 @@ public sealed class XafDetailTools
             ? e.ValidationRules.Any(r => r.InheritedFrom is null)
               || e.AppearanceRules.Any(r => r.InheritedFrom is null)
               || e.Properties.Any(p => p.InheritedFrom is null && !string.IsNullOrWhiteSpace(p.PersistentAlias))
+              || e.Lifecycle.Any(h => h.InheritedFrom is null)
             : e.ValidationRules.Count > 0
               || e.AppearanceRules.Count > 0
-              || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias));
+              || e.Properties.Any(p => !string.IsNullOrWhiteSpace(p.PersistentAlias))
+              || e.Lifecycle.Count > 0;
 
         var relevant = entities.Where(Governs).ToList();
 
-        if (relevant.Count == 0)
+        // A base borrowed from a referenced project is not an entity, so its hooks are declared by no
+        // class in the list; the application's rule set names them once, under the base.
+        var borrowedHooks = wholeApplication
+            ? LifecycleHooks.DeclaredIn(app)
+                .Where(entry => entry.Hook.InheritedFrom is not null)
+                .GroupBy(entry => entry.ClassName)
+                .ToList()
+            : [];
+
+        if (relevant.Count == 0 && borrowedHooks.Count == 0)
         {
+            // "Declares", because that is all that was read: a controller handling ObjectSpace.Committing
+            // may still change the object on save.
             return wholeApplication
-                ? $"{app.ProjectName} declares no validation rules, appearance rules or calculated properties."
-                : $"Nothing validates, styles or calculates on `{entity}`, and it inherits no such rule either.";
+                ? $"{app.ProjectName} declares no validation rules, appearance rules, calculated properties or methods run on create, load or save. Logic attached from outside a class is not read."
+                : $"`{entity}` declares no rule that validates, styles or calculates and no method run on create, load or save, and inherits none. Logic attached from outside the class is not read.";
         }
 
         var sb = new StringBuilder();
@@ -292,6 +310,13 @@ public sealed class XafDetailTools
             sb.AppendLine();
             sb.AppendLine($"## {target.ClassName}");
             AppendRules(sb, target, declaredOnly: wholeApplication);
+        }
+
+        foreach (var declared in borrowedHooks)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"## {declared.Key}");
+            AppendHooks(sb, declared.Select(entry => entry.Hook).ToList());
         }
 
         return sb.ToString();
@@ -865,6 +890,39 @@ public sealed class XafDetailTools
                 var declarer = property.InheritedFrom is { Length: > 0 } from ? $" (inherited from `{from}`)" : "";
                 sb.AppendLine($"- `{property.Name}` = `{property.PersistentAlias}`{declarer}");
             }
+        }
+
+        AppendHooks(sb, entity.Lifecycle
+            .Where(h => Wanted(h.InheritedFrom))
+            .OrderByDescending(h => h.InheritedFrom is null)
+            .ToList());
+    }
+
+    /// <summary>
+    /// The methods a class runs when an object is created, loaded or saved.
+    /// </summary>
+    /// <remarks>
+    /// What is assigned is listed, not when: a condition around an assignment is not read, so a property
+    /// named here is one the method may set, not one it always sets.
+    /// </remarks>
+    private static void AppendHooks(StringBuilder sb, IReadOnlyList<ExtractedLifecycleHook> hooks)
+    {
+        if (hooks.Count == 0)
+            return;
+
+        sb.AppendLine();
+        sb.AppendLine("### Runs when created, loaded or saved");
+        sb.AppendLine();
+
+        foreach (var hook in hooks)
+        {
+            var assigns = hook.AssignedProperties.Count > 0
+                ? $", assigns {string.Join(", ", hook.AssignedProperties.Select(p => $"`{p}`"))}"
+                : "";
+            var at = At(hook.FilePath, hook.Line) is { Length: > 0 } where ? $" — {where}" : "";
+            var declarer = hook.InheritedFrom is { Length: > 0 } from ? $" (inherited from `{from}`)" : "";
+
+            sb.AppendLine($"- {LifecycleHooks.When(hook.Trigger)}: `{hook.MethodName}`{assigns}{at}{declarer}");
         }
     }
 
