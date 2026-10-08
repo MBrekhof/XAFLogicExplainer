@@ -40,6 +40,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   roles updater. Not reached still: a part of a `partial` updater that does not repeat the base list, an
   updater on a base of the application's own, and an updater in a referenced project.
 
+- **A partial class whose other part only adds an interface reported the interface as its base.** A
+  class split into `Student.cs` (`partial class Student : BaseObject`) and `Student.Layout.cs`
+  (`partial class Student : ISupportViewLayoutCustomization`) was merged around whichever part with a
+  base list sorted first, on the reasoning that only the hand-written part declares one. Both did, and
+  the layout part sorts first, so the class was cited from the layout file, its base read
+  `ISupportViewLayoutCustomization`, and `AGENTS.md` told an agent to derive new entities from it. The
+  part that names the base class is now the class: the first entry of its base list is the base this
+  class was resolved to, a root base, or a class the business class library ships. A base nobody can
+  vouch for decides nothing, as before. On a generated application all 13 classes were affected; on
+  three hand-written ones, none.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.
