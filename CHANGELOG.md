@@ -9,6 +9,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A to-one navigation written with a nullable annotation was not a relationship.** The type of
+  `public virtual Student? Student` was compared with the application's class names question mark
+  included, so it matched none of them. With nullable reference types on, every reference that may be
+  empty is written that way, and the index showed only the collection side of the association: what a
+  lesson belongs to had no answer. An XPO `[Association]` written the same way named the class
+  `Customer?`. On four real EF Core applications this was 117 of 298 relationships, and on the largest
+  73 of 183. The property keeps its type as written.
+
+- **A folder in the platform project was printed as a path on the machine that ran the extraction.**
+  `AGENTS.md` names the folders controllers live in, and the recipe for adding an action repeats them. A
+  controller in the platform project beside the module sits outside the module's folder, and its folder
+  fell through to the absolute path — in a file meant to be committed, next to citations of the same
+  controllers that were relative, and different on every machine that regenerated it. Folders are now
+  named the way citations name files: `Controllers/` in the module, `../App.Blazor.Server/Controllers/`
+  beside it, and not at all when they are in neither the project nor the solution. On two real
+  applications five of their seven controller folders were printed that way.
+
 - **Only one updater was read.** `GetModuleUpdaters` returns as many updaters as a module likes, and
   applications split them by concern: one for roles, one for reference data, one per generated feature.
   The extraction read the template's `Updater`, else the first class deriving from `ModuleUpdater`, so

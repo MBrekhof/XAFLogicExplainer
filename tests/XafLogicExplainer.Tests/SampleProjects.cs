@@ -93,6 +93,14 @@ internal static class SampleProjects
     public static string CompileRemovePath =>
         Path.Combine(FixturesRoot, "CompileRemoveSolution", "Archive.Module");
 
+    /// <summary>Path to the EF Core module whose to-one navigations are written with nullable annotations.</summary>
+    public static string NullableNavigationEfPath =>
+        Path.Combine(FixturesRoot, "NullableNavigationSolution", "Lessons.Module");
+
+    /// <summary>Path to the XPO module whose association is written with a nullable annotation.</summary>
+    public static string NullableNavigationXpoPath =>
+        Path.Combine(FixturesRoot, "NullableAssociationSolution", "Rentals.Module");
+
     /// <summary>Path to the module that registers several updaters.</summary>
     public static string UpdatersPath =>
         Path.Combine(FixturesRoot, "UpdatersSolution", "Clinic.Module");
@@ -190,6 +198,8 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyBuiltInBases = new(() => Extract(BuiltInBasesPath));
     private static readonly Lazy<ExtractedProject> LazySharedClassName = new(() => Extract(SharedClassNamePath));
     private static readonly Lazy<ExtractedProject> LazyCompileRemove = new(() => Extract(CompileRemovePath));
+    private static readonly Lazy<ExtractedProject> LazyNullableNavigationEf = new(() => Extract(NullableNavigationEfPath));
+    private static readonly Lazy<ExtractedProject> LazyNullableNavigationXpo = new(() => Extract(NullableNavigationXpoPath));
     private static readonly Lazy<ExtractedProject> LazyUpdaters = new(() => Extract(UpdatersPath));
     private static readonly Lazy<ExtractedProject> LazyMigratedProject = new(() => Extract(MigratedProjectPath));
 
@@ -289,6 +299,17 @@ internal static class SampleProjects
     /// by pattern — beside a class removed only under a condition, which is still compiled.
     /// </summary>
     public static ExtractedProject CompileRemove => LazyCompileRemove.Value;
+
+    /// <summary>
+    /// An EF Core lessons application with nullable reference types on: a lesson's student may be
+    /// empty and is written <c>Student?</c>, beside an instructor written without the annotation.
+    /// </summary>
+    public static ExtractedProject NullableNavigationEf => LazyNullableNavigationEf.Value;
+
+    /// <summary>
+    /// The XPO counterpart: a rental's customer, an association written <c>Customer?</c>.
+    /// </summary>
+    public static ExtractedProject NullableNavigationXpo => LazyNullableNavigationXpo.Value;
 
     /// <summary>
     /// A clinic whose module registers six updaters — the template's, one for roles, one for wards,
