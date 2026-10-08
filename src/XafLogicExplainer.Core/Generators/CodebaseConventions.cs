@@ -19,10 +19,10 @@ public sealed class CodebaseConventions
     /// <summary>Longest namespace prefix shared by all entities, if there is one.</summary>
     public string? EntityNamespace { get; init; }
 
-    /// <summary>Directory (relative to the project) where most entities live.</summary>
+    /// <summary>Directory where most entities live, named the way citations name files.</summary>
     public string? EntityFolder { get; init; }
 
-    /// <summary>Directory (relative to the project) where most controllers live.</summary>
+    /// <summary>Directory where most controllers live, named the way citations name files.</summary>
     public string? ControllerFolder { get; init; }
 
     /// <summary>
@@ -72,12 +72,12 @@ public sealed class CodebaseConventions
         return new CodebaseConventions
         {
             EntityNamespace = MostCommon(entities.Select(e => e.Namespace)),
-            EntityFolder = MostCommon(entities.Select(e => FolderOf(e.FilePath, project.ProjectPath))),
-            ControllerFolder = MostCommon(controllers.Select(c => FolderOf(c.FilePath, project.ProjectPath))),
+            EntityFolder = MostCommon(entities.Select(e => FolderOf(e.FilePath, project))),
+            ControllerFolder = MostCommon(controllers.Select(c => FolderOf(c.FilePath, project))),
             ControllerFolders =
             [
                 .. controllers
-                    .Select(c => FolderOf(c.FilePath, project.ProjectPath))
+                    .Select(c => FolderOf(c.FilePath, project))
                     .Where(folder => !string.IsNullOrWhiteSpace(folder))
                     .GroupBy(folder => folder!, StringComparer.Ordinal)
                     .OrderByDescending(group => group.Count())
@@ -182,10 +182,16 @@ public sealed class CodebaseConventions
     }
 
     /// <summary>
-    /// Reduces an absolute source path to a project-relative directory, using forward slashes so
-    /// the generated documentation reads the same on every platform.
+    /// The folder a source file sits in, named the way citations name files: relative to the
+    /// project, or to the solution beside it for a platform project, with forward slashes.
     /// </summary>
-    private static string? FolderOf(string filePath, string projectPath)
+    /// <remarks>
+    /// A controller in the platform project sits outside the module, and its folder used to fall
+    /// through to the absolute path of whichever machine ran the extraction — in a document meant to
+    /// be committed, next to citations of the same files that were relative. A file in the project
+    /// folder itself has no folder to report, and neither has one outside both project and solution.
+    /// </remarks>
+    private static string? FolderOf(string filePath, ExtractedProject project)
     {
         if (string.IsNullOrWhiteSpace(filePath))
             return null;
@@ -194,26 +200,10 @@ public sealed class CodebaseConventions
         if (string.IsNullOrWhiteSpace(directory))
             return null;
 
-        if (!string.IsNullOrWhiteSpace(projectPath))
-        {
-            try
-            {
-                var relative = Path.GetRelativePath(projectPath, directory);
-                // GetRelativePath walks upward with ".." when the file sits outside the project --
-                // which happens for entities pulled in from a sibling project. An upward path is
-                // not a convention worth reporting, so drop it.
-                if (!relative.StartsWith("..", StringComparison.Ordinal) && relative != ".")
-                    directory = relative;
-                else if (relative == ".")
-                    return null;
-            }
-            catch (ArgumentException)
-            {
-                // Paths on different roots. Fall through to the directory name.
-            }
-        }
+        if (string.IsNullOrWhiteSpace(project.ProjectPath))
+            return directory.Replace('\\', '/').Trim('/');
 
-        return directory.Replace('\\', '/').Trim('/');
+        return SourceCitation.Within(project, directory) is { Length: > 0 } folder ? folder : null;
     }
 }
 
