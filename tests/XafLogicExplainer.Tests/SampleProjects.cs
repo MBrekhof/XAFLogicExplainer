@@ -109,6 +109,14 @@ internal static class SampleProjects
     public static string PartialLayoutPath =>
         Path.Combine(FixturesRoot, "PartialLayoutSolution", "Driving.Module");
 
+    /// <summary>Path to the EF Core module whose classes run code when created, loaded or saved.</summary>
+    public static string LifecyclePath =>
+        Path.Combine(FixturesRoot, "LifecycleSolution", "Garage.Module");
+
+    /// <summary>Path to the XPO module with a create hook.</summary>
+    public static string LifecycleXpoPath =>
+        Path.Combine(FixturesRoot, "LifecycleXpoSolution", "Depot.Module");
+
     /// <summary>Path to the module with a pre-SDK project file beside the SDK one that replaced it.</summary>
     public static string MigratedProjectPath =>
         Path.Combine(FixturesRoot, "MigratedProjectSolution", "Ledger.Module");
@@ -206,6 +214,8 @@ internal static class SampleProjects
     private static readonly Lazy<ExtractedProject> LazyNullableNavigationXpo = new(() => Extract(NullableNavigationXpoPath));
     private static readonly Lazy<ExtractedProject> LazyUpdaters = new(() => Extract(UpdatersPath));
     private static readonly Lazy<ExtractedProject> LazyPartialLayout = new(() => Extract(PartialLayoutPath));
+    private static readonly Lazy<ExtractedProject> LazyLifecycle = new(() => Extract(LifecyclePath));
+    private static readonly Lazy<ExtractedProject> LazyLifecycleXpo = new(() => Extract(LifecycleXpoPath));
     private static readonly Lazy<ExtractedProject> LazyMigratedProject = new(() => Extract(MigratedProjectPath));
 
     /// <summary>The XPO sample: Customer, Order, OrderLine, one controller, seed data, xafml.</summary>
@@ -328,6 +338,17 @@ internal static class SampleProjects
     /// that only adds an interface for its screens.
     /// </summary>
     public static ExtractedProject PartialLayout => LazyPartialLayout.Value;
+
+    /// <summary>
+    /// A garage whose classes run code when an object is created, loaded or saved: an audit base and
+    /// descendants that inherit, replace or extend its save hook, an explicit and an implicit
+    /// <c>IXafEntityObject</c> implementation, a method that only shares the name, a hook on the other
+    /// part of a partial class, and a base in a referenced library.
+    /// </summary>
+    public static ExtractedProject Lifecycle => LazyLifecycle.Value;
+
+    /// <summary>The XPO spelling of a create hook, <c>AfterConstruction</c>.</summary>
+    public static ExtractedProject LifecycleXpo => LazyLifecycleXpo.Value;
 
     /// <summary>
     /// A ledger application mid-migration: a folder-named pre-SDK project file that lists its sources

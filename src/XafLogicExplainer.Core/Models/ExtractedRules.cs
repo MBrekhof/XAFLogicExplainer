@@ -225,3 +225,86 @@ public enum BusinessRuleCategory
     /// </summary>
     AccessControl
 }
+
+/// <summary>
+/// When the Object Space calls a business object's own code.
+/// </summary>
+public enum LifecycleTrigger
+{
+    /// <summary>The object is created: <c>OnCreated</c>, or <c>AfterConstruction</c> in XPO.</summary>
+    Created,
+
+    /// <summary>The object is loaded from the database: <c>OnLoaded</c>.</summary>
+    Loaded,
+
+    /// <summary>The object is saved or deleted: <c>OnSaving</c>.</summary>
+    Saving,
+}
+
+/// <summary>
+/// A method on a business class that the Object Space calls when an object is created, loaded or
+/// saved — the place XAF documents for logic that belongs to the object rather than to a screen.
+/// </summary>
+/// <remarks>
+/// Only what the class declares. Logic attached from outside it — a controller handling
+/// <c>ObjectSpace.Committing</c>, a job — is not read here, so a class with no hook is not a class
+/// nothing happens to on save.
+/// </remarks>
+public class ExtractedLifecycleHook
+{
+    /// <summary>When the method runs.</summary>
+    public LifecycleTrigger Trigger { get; set; }
+
+    /// <summary>The method as declared: <c>OnSaving</c>, <c>AfterConstruction</c>.</summary>
+    public string MethodName { get; set; } = string.Empty;
+
+    /// <summary>Source file the method is declared in.</summary>
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>One-based line of the method name, or zero when unknown.</summary>
+    public int Line { get; set; }
+
+    /// <summary>
+    /// Properties of the class the method assigns, in the order written.
+    /// </summary>
+    /// <remarks>
+    /// Assigned somewhere in the method, not necessarily every time it runs: a condition around an
+    /// assignment is not read. An assignment inside a lambda or a local function is left out, because
+    /// nothing proves it runs at all, and so is a name the method declares itself.
+    /// </remarks>
+    public List<string> AssignedProperties { get; set; } = [];
+
+    /// <summary>Whether the method calls the same method on its base class.</summary>
+    /// <remarks>
+    /// It decides what a descendant inherits: an override that does not call <c>base</c> replaces
+    /// the hook above it, which then never runs for that class.
+    /// </remarks>
+    public bool CallsBase { get; set; }
+
+    /// <summary>
+    /// The class that declared this hook, when it is not the entity listing it.
+    /// </summary>
+    public string? InheritedFrom { get; set; }
+
+    /// <summary>The namespace of <see cref="InheritedFrom"/>, which tells it apart from a class of the same name.</summary>
+    public string? InheritedFromNamespace { get; set; }
+
+    internal bool IsOverride { get; set; }
+
+    internal bool IsExplicitImplementation { get; set; }
+
+    /// <summary>A <c>new virtual</c> namesake: not a hook, only evidence for the fold.</summary>
+    internal bool IsNewSlot { get; set; }
+
+    internal bool IsPublic { get; set; }
+
+    internal bool HasBody { get; set; }
+
+    /// <summary>A copy this hook's declarer does not share.</summary>
+    public ExtractedLifecycleHook Clone()
+    {
+        var copy = (ExtractedLifecycleHook)MemberwiseClone();
+        copy.AssignedProperties = [.. AssignedProperties];
+        return copy;
+    }
+}

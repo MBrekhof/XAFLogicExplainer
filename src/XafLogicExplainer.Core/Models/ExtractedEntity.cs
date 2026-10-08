@@ -117,6 +117,15 @@ public class ExtractedEntity
     public List<ExtractedBusinessRule> InferredBusinessRules { get; set; } = [];
 
     /// <summary>
+    /// Methods the Object Space calls when an object of this class is created, loaded or saved.
+    /// </summary>
+    /// <remarks>
+    /// Including those a base class declares, marked with <see cref="ExtractedLifecycleHook.InheritedFrom"/>,
+    /// unless this class overrides the method without calling the base one.
+    /// </remarks>
+    public List<ExtractedLifecycleHook> Lifecycle { get; set; } = [];
+
+    /// <summary>
     /// Source comments found around the class declaration.
     /// </summary>
     public List<string> SourceComments { get; set; } = [];

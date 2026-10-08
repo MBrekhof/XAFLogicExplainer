@@ -82,6 +82,23 @@ public class EntityAnalyzer : IEntityAnalyzer
         // One entity per class, not per declaration -- a partial split across files is one thing.
         entities = MergePartialDeclarations(entities, borrowed, parents, options);
 
+        foreach (var entity in entities)
+        {
+            var explicitlyImplemented = entity.Lifecycle.Where(hook => hook.IsExplicitImplementation)
+                .Select(hook => hook.MethodName).ToHashSet(StringComparer.Ordinal);
+
+            // A class that names the interface again maps it to its own public method, `new virtual` or not.
+            if (entity.BaseTypes.Contains("IXafEntityObject"))
+            {
+                foreach (var hook in entity.Lifecycle.Where(hook => hook.IsNewSlot && hook.IsPublic && hook.MethodName != "AfterConstruction"
+                                                                     && !explicitlyImplemented.Contains(hook.MethodName)))
+                    hook.IsNewSlot = false;
+            }
+
+            // An abstract method runs nothing itself; the overrides below it are the hooks.
+            entity.Lifecycle.RemoveAll(hook => !IsLifecycleHook(hook, entity, explicitlyImplemented) || (!hook.IsNewSlot && !hook.HasBody));
+        }
+
         // Post-extraction: infer EF Core relationships from navigation properties
         if (ormType == OrmType.EfCore)
             InferEfCoreRelationships(entities);
@@ -91,6 +108,18 @@ public class EntityAnalyzer : IEntityAnalyzer
         // second time under the descendant that received a copy of it — the fold carries the
         // parent's relationship down itself, marked with the class that declared it.
         FoldInheritance(entities, parents, borrowed);
+
+        // After the fold, so a hook on a base is checked against the properties the base declares
+        // and a descendant against everything it inherits.
+        foreach (var entity in entities)
+        {
+            var properties = entity.Properties.Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+
+            entity.Lifecycle.RemoveAll(hook => hook.IsNewSlot);
+
+            foreach (var hook in entity.Lifecycle)
+                hook.AssignedProperties.RemoveAll(name => !properties.Contains(name));
+        }
 
         // After the fold, which is the whole reason they were read: `Cliente` keeps the
         // `CreatedOn` it inherits from a base in the shared project, and the shared project own
@@ -190,6 +219,11 @@ public class EntityAnalyzer : IEntityAnalyzer
 
         // Extract appearance rules from class-level attributes
         entity.AppearanceRules.AddRange(ExtractAppearanceRules(classDecl));
+
+        // The methods the Object Space calls on create, load and save. Which of them are hooks is
+        // settled once the parts of a partial class are merged, because the interface that makes a
+        // public OnSaving one may be declared on another part.
+        entity.Lifecycle.AddRange(ExtractLifecycleHookCandidates(classDecl, filePath));
 
         // Extract comments
         if (options.IncludeComments)
@@ -1307,6 +1341,7 @@ public class EntityAnalyzer : IEntityAnalyzer
                 primary.ValidationRules.AddRange(entity.ValidationRules);
                 primary.AppearanceRules.AddRange(entity.AppearanceRules);
                 primary.InferredBusinessRules.AddRange(entity.InferredBusinessRules);
+                primary.Lifecycle.AddRange(entity.Lifecycle);
                 primary.SourceComments.AddRange(entity.SourceComments);
             }
         }
@@ -1422,7 +1457,212 @@ public class EntityAnalyzer : IEntityAnalyzer
 
         FoldInto(entity.Relationships, parent.Relationships, parent.ClassName, rel => rel.PropertyName,
                  rel => rel.Clone(), (rel, declarer) => rel.InheritedFrom ??= declarer);
+
+        // A hook runs for a descendant only if nothing stops it: an override of the same method that
+        // does not call base replaces every hook above it for that trigger, including the ones the
+        // parent itself inherited.
+        //
+        // An override of a method a base started with `new virtual` overrides that method, not the hook,
+        // so it is not one and replaces nothing. Likewise below an explicit implementation, which the Object
+        // Space keeps calling. Either way, unless the class names the interface again: then its own method is it.
+        var restarted = parent.Lifecycle
+            .Where(hook => (hook.IsNewSlot || hook.IsExplicitImplementation) && !entity.BaseTypes.Contains("IXafEntityObject"))
+            .Select(hook => hook.MethodName).ToHashSet(StringComparer.Ordinal);
+        entity.Lifecycle.RemoveAll(own => own.InheritedFrom is null && own.IsOverride && restarted.Contains(own.MethodName));
+
+        var inheritedHooks = parent.Lifecycle.Where(hook => hook.IsNewSlot || !entity.Lifecycle.Any(own =>
+            own.InheritedFrom is null && !own.IsNewSlot && own.Trigger == hook.Trigger && !own.CallsBase)).ToList();
+        foreach (var hook in inheritedHooks)
+        {
+            var copy = hook.Clone();
+            if (copy.InheritedFrom is null)
+            {
+                copy.InheritedFrom = parent.ClassName;
+                copy.InheritedFromNamespace = parent.Namespace;
+            }
+            entity.Lifecycle.Add(copy);
+        }
     }
+
+    /// <summary>
+    /// Methods of one declaration that may be lifecycle hooks, with what they assign.
+    /// </summary>
+    /// <remarks>
+    /// A name alone is not enough — any class may have a method called <c>OnSaving</c> — so only
+    /// three shapes are kept: an override (of <c>BaseObject</c>'s, or XPO's), an explicit
+    /// <c>IXafEntityObject</c> implementation, and a public method, which is a hook only when the class
+    /// names <c>IXafEntityObject</c> (<see cref="IsLifecycleHook"/>, after the parts are merged).
+    /// </remarks>
+    private static IEnumerable<ExtractedLifecycleHook> ExtractLifecycleHookCandidates(ClassDeclarationSyntax classDecl, string filePath)
+    {
+        foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
+        {
+            var name = method.Identifier.Text;
+            LifecycleTrigger? trigger = name switch
+            {
+                "OnCreated" or "AfterConstruction" => LifecycleTrigger.Created,
+                "OnLoaded" => LifecycleTrigger.Loaded,
+                "OnSaving" => LifecycleTrigger.Saving,
+                _ => null,
+            };
+
+            if (trigger is null || method.ParameterList.Parameters.Count > 0 || method.TypeParameterList is not null
+                || method.ReturnType is not PredefinedTypeSyntax { Keyword.RawKind: (int)SyntaxKind.VoidKeyword }
+                || method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)))
+                continue;
+
+            var isOverride = method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.OverrideKeyword));
+            var isExplicit = method.ExplicitInterfaceSpecifier?.Name.ToString().EndsWith("IXafEntityObject", StringComparison.Ordinal) == true;
+            var isPublic = method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PublicKeyword));
+            var hasBody = method.Body is not null || method.ExpressionBody is not null;
+
+            // A `new virtual` namesake starts a method of its own: not a hook unless the class names the
+            // interface again (IsLifecycleHook), but it decides what an override below it is.
+            var isNewSlot = method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.NewKeyword))
+                && method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.VirtualKeyword) || modifier.IsKind(SyntaxKind.AbstractKeyword));
+
+            if (!isNewSlot && (!hasBody || (!isOverride && !isExplicit && !isPublic)))
+                continue;
+
+            yield return new ExtractedLifecycleHook
+            {
+                Trigger = trigger.Value,
+                MethodName = name,
+                FilePath = filePath,
+                Line = SourceLine.Of(method.Identifier),
+                AssignedProperties = AssignedNames(method),
+                // A call in a lambda or a local function may never run, so it does not keep the base hook,
+                // and neither does a call with arguments, which is an overload of the same name.
+                CallsBase = method.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(invocation =>
+                    invocation.Expression is MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax, Name: IdentifierNameSyntax } access
+                    && access.Name.Identifier.Text == name
+                    && invocation.ArgumentList.Arguments.Count == 0
+                    && !IsDeferred(invocation, method)),
+                IsOverride = isOverride,
+                IsExplicitImplementation = isExplicit,
+                IsNewSlot = isNewSlot,
+                IsPublic = isPublic,
+                HasBody = hasBody,
+            };
+        }
+    }
+
+    /// <summary>Whether a candidate read from a declaration is a hook the Object Space calls.</summary>
+    /// <remarks>
+    /// A class that implements an interface method explicitly is called there, so an override or a public
+    /// method of that name beside it is not. A public method counts only as one of the interface's three;
+    /// <c>AfterConstruction</c> is XPO's, and only as an override. Markers of a <c>new virtual</c> namesake
+    /// stay until the fold has used them.
+    /// </remarks>
+    private static bool IsLifecycleHook(ExtractedLifecycleHook hook, ExtractedEntity entity, HashSet<string> explicitlyImplemented) =>
+        hook.IsNewSlot || hook.IsExplicitImplementation
+        || (!explicitlyImplemented.Contains(hook.MethodName)
+            && (hook.IsOverride || (entity.BaseTypes.Contains("IXafEntityObject") && hook.MethodName != "AfterConstruction")));
+
+    /// <summary>
+    /// The names a method assigns to members of its own object, before they are checked against the
+    /// class's properties.
+    /// </summary>
+    /// <remarks>
+    /// <c>P = …</c>, <c>this.P = …</c>, <c>base.P = …</c>, and <c>SetPropertyValue(nameof(P), …)</c> or its
+    /// security-bypassing sibling with a <c>nameof</c> or a literal, and <c>P++</c> or <c>--P</c>. Left out: a
+    /// bare name the method body declares (a local, a pattern or loop variable) — <c>this.P</c> is the property
+    /// whatever the locals are called — a property set in an object initializer, which
+    /// belongs to the object being built, and anything inside a lambda, an anonymous method or a local
+    /// function, which may never run.
+    /// </remarks>
+    private static List<string> AssignedNames(MethodDeclarationSyntax method)
+    {
+        // Each name with the scope it is declared in, which is the only place it hides a property. Only
+        // declarations in code that runs: nothing inside a lambda or a local function is read anyway.
+        var declared = method.DescendantNodes()
+            .Where(node => !IsDeferred(node, method))
+            .Select(node => node switch
+            {
+                VariableDeclaratorSyntax variable => variable.Identifier.Text,
+                SingleVariableDesignationSyntax designation => designation.Identifier.Text,
+                ForEachStatementSyntax loop => loop.Identifier.Text,
+                CatchDeclarationSyntax @catch => @catch.Identifier.Text,
+                _ => null,
+            } is { } name
+                ? (Name: name, Scope: node.AncestorsAndSelf().TakeWhile(ancestor => ancestor != method).FirstOrDefault(ancestor =>
+                      ancestor is BlockSyntax or ForStatementSyntax or ForEachStatementSyntax or CatchClauseSyntax
+                          or UsingStatementSyntax or SwitchStatementSyntax
+                      // A switch's sections share one scope; only a case label's pattern belongs to its section.
+                      || (ancestor is SwitchSectionSyntax section && section.Labels.Any(label => label.Span.Contains(node.Span)))) ?? method)
+                : default)
+            .Where(declaration => declaration.Name is not null)
+            .ToList();
+
+        var names = new List<string>();
+
+        void Add(string? name)
+        {
+            if (name is { Length: > 0 } && !names.Contains(name, StringComparer.Ordinal))
+                names.Add(name);
+        }
+
+        // A bare name a local shadows is the local; this.P and base.P never are.
+        string? Target(ExpressionSyntax target) => target switch
+        {
+            IdentifierNameSyntax identifier when !declared.Any(declaration => declaration.Name == identifier.Identifier.Text
+                                                                              && identifier.Ancestors().Contains(declaration.Scope))
+                => identifier.Identifier.Text,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } access => access.Name.Identifier.Text,
+            _ => null,
+        };
+
+        foreach (var node in method.DescendantNodes())
+        {
+            if (IsDeferred(node, method))
+                continue;
+
+            switch (node)
+            {
+                case AssignmentExpressionSyntax assignment when assignment.Parent is not InitializerExpressionSyntax:
+                    Add(Target(assignment.Left));
+                    break;
+
+                case PostfixUnaryExpressionSyntax postfix when postfix.IsKind(SyntaxKind.PostIncrementExpression) || postfix.IsKind(SyntaxKind.PostDecrementExpression):
+                    Add(Target(postfix.Operand));
+                    break;
+
+                case PrefixUnaryExpressionSyntax prefix when prefix.IsKind(SyntaxKind.PreIncrementExpression) || prefix.IsKind(SyntaxKind.PreDecrementExpression):
+                    Add(Target(prefix.Operand));
+                    break;
+
+                case InvocationExpressionSyntax invocation
+                    when InvokedOnThis(invocation) is "SetPropertyValue" or "SetPropertyValueWithSecurityBypass"
+                         && invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is { } first:
+                    Add(first switch
+                    {
+                        LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression) => literal.Token.ValueText,
+                        InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "nameof" } } => SyntaxLiteral.ValueOf(first),
+                        _ => null,
+                    });
+                    break;
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// The name of a method called on the object itself — with no receiver, or on <c>this</c> or
+    /// <c>base</c> — and null for a call on anything else, which sets another object's property.
+    /// </summary>
+    private static string? InvokedOnThis(InvocationExpressionSyntax invocation) => invocation.Expression switch
+    {
+        IdentifierNameSyntax identifier => identifier.Identifier.Text,
+        GenericNameSyntax generic => generic.Identifier.Text,
+        MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } access => access.Name.Identifier.Text,
+        _ => null,
+    };
+
+    /// <summary>Whether a node sits in a lambda, an anonymous method or a local function inside the method.</summary>
+    private static bool IsDeferred(SyntaxNode node, SyntaxNode method) => node.Ancestors()
+        .TakeWhile(ancestor => ancestor != method)
+        .Any(ancestor => ancestor is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax);
 
     /// <summary>
     /// Adds what the parent declared to the descendant, keeping the descendant's own where the two

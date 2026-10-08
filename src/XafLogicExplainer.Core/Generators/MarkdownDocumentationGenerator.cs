@@ -433,6 +433,25 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
     /// <summary>Says which class a folded declaration came from, for a cell that has none.</summary>
     private string Inherited(string declarer) => $"{L("heredado de", "inherited from")} `{declarer}`";
 
+    /// <summary>One lifecycle hook on one line: when it runs, the method, what it assigns, and where.</summary>
+    private string DescribeHook(ExtractedProject project, ExtractedLifecycleHook hook)
+    {
+        var when = hook.Trigger switch
+        {
+            LifecycleTrigger.Created => L("al crear", "when created"),
+            LifecycleTrigger.Loaded => L("al cargar", "when loaded"),
+            _ => L("al guardar", "when saved"),
+        };
+
+        var assigns = hook.AssignedProperties.Count > 0
+            ? $", {L("asigna", "assigns")} {string.Join(", ", hook.AssignedProperties.Select(p => $"`{p}`"))}"
+            : "";
+
+        var at = SourceCitation.Of(project, hook.FilePath, hook.Line) is { Length: > 0 } citation ? $" — {citation}" : "";
+
+        return $"**{when}**: `{hook.MethodName}`{assigns}{at}";
+    }
+
     /// <summary>
     /// Names a validation rule the way the rest of the application does, when it was named.
     /// </summary>
@@ -908,6 +927,17 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
                 sb.AppendLine();
             }
 
+            if (entity.Lifecycle.Count > 0)
+            {
+                sb.AppendLine($"### {_l.LifecycleLogic}");
+                sb.AppendLine();
+                foreach (var hook in entity.Lifecycle.OrderByDescending(h => h.InheritedFrom is null))
+                {
+                    sb.AppendLine($"- {DescribeHook(project, hook)}{Declarer(hook.InheritedFrom)}");
+                }
+                sb.AppendLine();
+            }
+
             sb.AppendLine("---");
             sb.AppendLine();
         }
@@ -1058,6 +1088,26 @@ public class MarkdownDocumentationGenerator : IDocumentationGenerator
             foreach (var rule in entity.AppearanceRules.Where(r => r.InheritedFrom is null))
             {
                 sb.AppendLine($"- {OpenAppearance(rule)}{DescribeAppearance(rule)}");
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine($"## {_l.LifecycleLogic}");
+        sb.AppendLine();
+        sb.AppendLine(L(
+            "Metodos que una clase de negocio declara y que el Object Space llama al crear, cargar o guardar un objeto. " +
+            "La logica enganchada desde fuera de la clase (un controlador que maneja `ObjectSpace.Committing`, un job) " +
+            "no se lista: que una clase no aparezca aqui no significa que nada cambie al guardarla.",
+            "Methods a business class declares that the Object Space calls when an object is created, loaded or saved. " +
+            "Logic attached from outside the class (a controller handling `ObjectSpace.Committing`, a job) is not " +
+            "listed: a class missing here may still change when it is saved."));
+        sb.AppendLine();
+        foreach (var declared in LifecycleHooks.DeclaredIn(project).GroupBy(entry => entry.ClassName))
+        {
+            sb.AppendLine($"### {declared.Key}");
+            foreach (var (_, hook) in declared)
+            {
+                sb.AppendLine($"- {DescribeHook(project, hook)}");
             }
             sb.AppendLine();
         }

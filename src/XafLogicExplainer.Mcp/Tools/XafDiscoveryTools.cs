@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
+using XafLogicExplainer.Core.Generators;
 using XafLogicExplainer.Core.Models;
 
 namespace XafLogicExplainer.Mcp.Tools;
@@ -177,6 +178,20 @@ public sealed class XafDiscoveryTools
                     var says = rule.MessageTemplate ?? rule.Expression;
                     hits.Add($"**rule** `{entity.ClassName}` {rule.RuleType} on `{rule.TargetProperty}` — {Compact(says)}");
                 }
+            }
+        }
+
+        if (Wanted("rule"))
+        {
+            // A method a class runs on create, load or save is a rule too, and is looked for by what it
+            // sets. Each once, under the class that declared it, for the reason the rules above are.
+            foreach (var (className, hook) in LifecycleHooks.DeclaredIn(app).Where(entry =>
+                         Matches(entry.Hook.MethodName) || entry.Hook.AssignedProperties.Any(name => Matches(name))))
+            {
+                var assigns = hook.AssignedProperties.Count > 0
+                    ? $", assigns {string.Join(", ", hook.AssignedProperties.Select(p => $"`{p}`"))}"
+                    : "";
+                hits.Add($"**rule** `{className}` {hook.MethodName} — runs {LifecycleHooks.When(hook.Trigger)}{assigns}");
             }
         }
 
