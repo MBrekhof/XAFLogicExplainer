@@ -18,21 +18,19 @@ public class UpdaterAnalyzer
     /// <returns>Extracted seed-data descriptors.</returns>
     public List<ExtractedSeedData> AnalyzeUpdater(string sourceDirectory, ExtractionOptions options)
     {
+        // Each updater on its own terms, one after the other: a seed method is recorded once per
+        // updater, and two updaters with a method of the same name seed two different things.
+        return FindUpdaterClasses(sourceDirectory)
+            .SelectMany(classDecl => SeedDataOf(classDecl, options))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The seed data one updater class creates.
+    /// </summary>
+    private static List<ExtractedSeedData> SeedDataOf(ClassDeclarationSyntax classDecl, ExtractionOptions options)
+    {
         var seedData = new List<ExtractedSeedData>();
-        var updaterFile = FindUpdaterFile(sourceDirectory, options);
-
-        if (updaterFile == null) return seedData;
-
-        var source = File.ReadAllText(updaterFile);
-        var tree = CSharpSyntaxTree.ParseText(source, path: updaterFile);
-        var root = tree.GetRoot();
-
-        var classDecl = root.DescendantNodes()
-            .OfType<ClassDeclarationSyntax>()
-            .FirstOrDefault(c => c.Identifier.Text == "Updater"
-                                  || c.BaseList?.Types.Any(t => t.Type.ToString().Contains("ModuleUpdater")) == true);
-
-        if (classDecl == null) return seedData;
 
         // Find all methods that create seed data
         foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
@@ -76,11 +74,8 @@ public class UpdaterAnalyzer
     public List<ExtractedMigration> AnalyzeMigrations(string sourceDirectory, ExtractionOptions options)
     {
         var migrations = new List<ExtractedMigration>();
-        var classDecl = FindUpdaterClass(sourceDirectory, options);
 
-        if (classDecl is null)
-            return migrations;
-
+        foreach (var classDecl in FindUpdaterClasses(sourceDirectory))
         foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
         {
             if (method.Body is null)
@@ -189,32 +184,6 @@ public class UpdaterAnalyzer
             single = single.Replace("  ", " ", StringComparison.Ordinal);
 
         return single;
-    }
-
-    /// <summary>
-    /// Locates and parses the updater class, shared by seed and migration extraction.
-    /// </summary>
-    private static ClassDeclarationSyntax? FindUpdaterClass(string sourceDirectory, ExtractionOptions options)
-    {
-        var updaterFile = FindUpdaterFile(sourceDirectory, options);
-
-        if (updaterFile is null)
-            return null;
-
-        try
-        {
-            var root = CSharpSyntaxTree.ParseText(File.ReadAllText(updaterFile), path: updaterFile).GetRoot();
-
-            return root.DescendantNodes()
-                .OfType<ClassDeclarationSyntax>()
-                .FirstOrDefault(c => c.Identifier.Text == "Updater"
-                                  || c.BaseList?.Types.Any(t =>
-                                         t.Type.ToString().Contains("ModuleUpdater", StringComparison.Ordinal)) == true);
-        }
-        catch (IOException)
-        {
-            return null;
-        }
     }
 
     /// <summary>
@@ -334,7 +303,7 @@ public class UpdaterAnalyzer
                     seed.Records.Add(record);
 
                 // Find subsequent property assignments
-                var block = method.Body;
+                var block = ScopeOf(creation, variableName, method.Body);
                 var assignments = block.DescendantNodes()
                     .OfType<AssignmentExpressionSyntax>()
                     .Where(a => a.Left is MemberAccessExpressionSyntax mae
@@ -396,7 +365,7 @@ public class UpdaterAnalyzer
 
             var record = new SeedRecord();
 
-            foreach (var assignment in body.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            foreach (var assignment in ScopeOf(creation, variableName, body).DescendantNodes().OfType<AssignmentExpressionSyntax>())
             {
                 if (assignment.Left is MemberAccessExpressionSyntax member
                     && member.Expression.ToString() == variableName)
@@ -408,6 +377,31 @@ public class UpdaterAnalyzer
             if (record.PropertyValues.Count > 0)
                 seed.Records.Add(record);
         }
+    }
+
+    /// <summary>
+    /// The block the variable holding a created object is declared in — where its assignments are.
+    /// </summary>
+    /// <remarks>
+    /// Two blocks that each declare <c>var role</c> hold two variables of one name. Collecting
+    /// <c>role.Name = …</c> across the whole method gave both records every assignment and the last
+    /// one won, so an updater seeding a Guest and an Admin role was read as two Admins. A variable
+    /// assigned rather than declared at the creation — <c>role = ObjectSpace.CreateObject…</c> after
+    /// a lookup — is scoped where it was declared, usually the method; and anything else, the method.
+    /// </remarks>
+    private static BlockSyntax ScopeOf(SyntaxNode creation, string variableName, BlockSyntax body)
+    {
+        foreach (var block in creation.Ancestors().OfType<BlockSyntax>())
+        {
+            if (block.Statements.OfType<LocalDeclarationStatementSyntax>()
+                .Any(statement => statement.Declaration.Variables.Any(v => v.Identifier.Text == variableName)))
+                return block;
+
+            if (block == body)
+                break;
+        }
+
+        return body;
     }
 
     /// <summary>
@@ -437,19 +431,28 @@ public class UpdaterAnalyzer
     }
 
     /// <summary>
-    /// Locates the module updater.
+    /// Every updater class in the module, the template's first.
     /// </summary>
     /// <remarks>
-    /// The XAF project template produces <c>DatabaseUpdate/Updater.cs</c>, so that is checked
-    /// first and costs nothing. Searching only for that file name was the whole strategy, though,
-    /// which meant a class named anything else — <c>SeedDataUpdater</c>, <c>DemoDataUpdater</c>,
-    /// or an updater split per area — made the tool report an application with no seed data at
-    /// all, silently. The final fallback looks for what actually matters: a class deriving from
-    /// <c>ModuleUpdater</c>.
+    /// <c>GetModuleUpdaters</c> returns as many updaters as a module likes, and applications split
+    /// them by concern: one for roles, one for reference data, one per generated feature. Searching
+    /// for one — the template's <c>DatabaseUpdate/Updater.cs</c>, else the first class deriving from
+    /// <c>ModuleUpdater</c> — reported the roles an application ships in an updater of their own as
+    /// seed data it does not have.
+    /// <para>
+    /// An updater is a class named <c>Updater</c> or one whose base list names <c>ModuleUpdater</c>,
+    /// as before. Files are read rather than trusted by name, bounded by the project directory and
+    /// what its project file compiles. The template's file comes first and the rest follow by path,
+    /// classes in declaration order, so an application with one updater reads exactly as it did.
+    /// </para>
+    /// <para>
+    /// Not reached: a part of a <c>partial</c> updater that does not repeat the base list, an updater
+    /// deriving from a base of the application's own, and an updater declared in a referenced project.
+    /// </para>
     /// </remarks>
-    private static string? FindUpdaterFile(string sourceDirectory, ExtractionOptions options)
+    private static List<ClassDeclarationSyntax> FindUpdaterClasses(string sourceDirectory)
     {
-        var candidates = new[]
+        var template = new[]
         {
             Path.Combine(sourceDirectory, "DatabaseUpdate", "Updater.cs"),
             Path.Combine(sourceDirectory, "Updater.cs"),
@@ -457,47 +460,36 @@ public class UpdaterAnalyzer
 
         var removed = CompileExclusions.For(sourceDirectory);
 
-        foreach (var candidate in candidates)
+        var files = Directory.GetFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories)
+            .Where(file => BuildOutputFilter.IsAnalyzable(file, sourceDirectory) && !removed.Excludes(file))
+            .OrderBy(file => Array.FindIndex(template, candidate => candidate.Equals(file, StringComparison.OrdinalIgnoreCase)) switch
+            {
+                -1 => template.Length,
+                var index => index,
+            })
+            .ThenBy(file => file, StringComparer.Ordinal);
+
+        var classes = new List<ClassDeclarationSyntax>();
+
+        foreach (var file in files)
         {
-            if (File.Exists(candidate) && !removed.Excludes(candidate))
-                return candidate;
-        }
-
-        var byName = Directory.GetFiles(sourceDirectory, "Updater.cs", SearchOption.AllDirectories)
-            .FirstOrDefault(f => BuildOutputFilter.IsAnalyzable(f, sourceDirectory) && !removed.Excludes(f));
-
-        if (byName != null)
-            return byName;
-
-        // Read files rather than trusting their names. Bounded by the project directory, and only
-        // reached when the conventional locations came up empty.
-        //
-        // The check parses for a class that actually derives from ModuleUpdater. Searching the
-        // text for "ModuleUpdater" instead picks the module itself, because every module declares
-        // `IEnumerable<ModuleUpdater> GetModuleUpdaters(...)` -- and the module has no updater
-        // class in it, so the search would end on a file guaranteed to yield nothing.
-        foreach (var file in Directory.GetFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories))
-        {
-            if (!BuildOutputFilter.IsAnalyzable(file, sourceDirectory) || removed.Excludes(file))
-                continue;
-
             try
             {
                 var source = File.ReadAllText(file);
 
                 // Cheap gate before parsing: a file without the word cannot declare the class.
-                if (!source.Contains("ModuleUpdater", StringComparison.Ordinal))
+                if (!source.Contains("Updater", StringComparison.Ordinal))
                     continue;
 
-                var declaresUpdater = CSharpSyntaxTree.ParseText(source)
+                // Parsed for a class that is an updater, not searched as text: every module declares
+                // `IEnumerable<ModuleUpdater> GetModuleUpdaters(...)` and has no updater in it.
+                classes.AddRange(CSharpSyntaxTree.ParseText(source, path: file)
                     .GetRoot()
                     .DescendantNodes()
                     .OfType<ClassDeclarationSyntax>()
-                    .Any(c => c.BaseList?.Types.Any(t =>
-                        t.Type.ToString().EndsWith("ModuleUpdater", StringComparison.Ordinal)) == true);
-
-                if (declaresUpdater)
-                    return file;
+                    .Where(c => c.Identifier.Text == "Updater"
+                                || c.BaseList?.Types.Any(t =>
+                                    t.Type.ToString().Contains("ModuleUpdater", StringComparison.Ordinal)) == true));
             }
             catch (IOException)
             {
@@ -505,6 +497,6 @@ public class UpdaterAnalyzer
             }
         }
 
-        return null;
+        return classes;
     }
 }

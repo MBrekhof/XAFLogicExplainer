@@ -26,6 +26,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   beside it, and not at all when they are in neither the project nor the solution. On two real
   applications five of their seven controller folders were printed that way.
 
+- **Only one updater was read.** `GetModuleUpdaters` returns as many updaters as a module likes, and
+  applications split them by concern: one for roles, one for reference data, one per generated feature.
+  The extraction read the template's `Updater`, else the first class deriving from `ModuleUpdater`, so
+  seed data and migrations in every other updater were missing from a list that reads as all of it.
+  Every updater in the module is now read, the template's first and the rest by path, so an application
+  with one updater reads as it did. Reading them surfaced a second fault: assignments to a created object
+  were collected across the whole method by variable name, so two blocks that each declare `var role`
+  gave both records every assignment — an updater seeding a Guest and an Admin role read as two Admins.
+  Assignments are now read from the block the variable is declared in; one declared by `for`,
+  `using (…)`, a switch section or `out` is still read across the method. On a generated application four
+  seed blocks appear that were not read, among them its Guest and Admin roles; on a hand-written one, the
+  roles updater. Not reached still: a part of a `partial` updater that does not repeat the base list, an
+  updater on a base of the application's own, and an updater in a referenced project.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.
