@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Fixture only. Never built: it is input to the extractor, which reads it as text.
+    The XPO counterpart: an association whose reference side is written `Customer?`.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DevExpress.ExpressApp.Xpo" Version="25.2.4" />
+  </ItemGroup>
+
+</Project>
