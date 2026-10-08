@@ -22,6 +22,50 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that its completeness does not extend to it. On the largest of four real applications nine classes run
   such a hook; the other three declare none.
 
+### Fixed
+
+- **A to-one navigation written with a nullable annotation was not a relationship.** The type of
+  `public virtual Student? Student` was compared with the application's class names question mark
+  included, so it matched none of them. With nullable reference types on, every reference that may be
+  empty is written that way, and the index showed only the collection side of the association: what a
+  lesson belongs to had no answer. An XPO `[Association]` written the same way named the class
+  `Customer?`. On four real EF Core applications this was 117 of 298 relationships, and on the largest
+  73 of 183. The property keeps its type as written.
+
+- **A folder in the platform project was printed as a path on the machine that ran the extraction.**
+  `AGENTS.md` names the folders controllers live in, and the recipe for adding an action repeats them. A
+  controller in the platform project beside the module sits outside the module's folder, and its folder
+  fell through to the absolute path — in a file meant to be committed, next to citations of the same
+  controllers that were relative, and different on every machine that regenerated it. Folders are now
+  named the way citations name files: `Controllers/` in the module, `../App.Blazor.Server/Controllers/`
+  beside it, and not at all when they are in neither the project nor the solution. On two real
+  applications five of their seven controller folders were printed that way.
+
+- **Only one updater was read.** `GetModuleUpdaters` returns as many updaters as a module likes, and
+  applications split them by concern: one for roles, one for reference data, one per generated feature.
+  The extraction read the template's `Updater`, else the first class deriving from `ModuleUpdater`, so
+  seed data and migrations in every other updater were missing from a list that reads as all of it.
+  Every updater in the module is now read, the template's first and the rest by path, so an application
+  with one updater reads as it did. Reading them surfaced a second fault: assignments to a created object
+  were collected across the whole method by variable name, so two blocks that each declare `var role`
+  gave both records every assignment — an updater seeding a Guest and an Admin role read as two Admins.
+  Assignments are now read from the block the variable is declared in; one declared by `for`,
+  `using (…)`, a switch section or `out` is still read across the method. On a generated application four
+  seed blocks appear that were not read, among them its Guest and Admin roles; on a hand-written one, the
+  roles updater. Not reached still: a part of a `partial` updater that does not repeat the base list, an
+  updater on a base of the application's own, and an updater in a referenced project.
+
+- **A partial class whose other part only adds an interface reported the interface as its base.** A
+  class split into `Student.cs` (`partial class Student : BaseObject`) and `Student.Layout.cs`
+  (`partial class Student : ISupportViewLayoutCustomization`) was merged around whichever part with a
+  base list sorted first, on the reasoning that only the hand-written part declares one. Both did, and
+  the layout part sorts first, so the class was cited from the layout file, its base read
+  `ISupportViewLayoutCustomization`, and `AGENTS.md` told an agent to derive new entities from it. The
+  part that names the base class is now the class: the first entry of its base list is the base this
+  class was resolved to, a root base, or a class the business class library ships. A base nobody can
+  vouch for decides nothing, as before. On a generated application all 13 classes were affected; on
+  three hand-written ones, none.
+
 ## [0.17.2] — 2026-09-13
 
 The entity list is the application's own.

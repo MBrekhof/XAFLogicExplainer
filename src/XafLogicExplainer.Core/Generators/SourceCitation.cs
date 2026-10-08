@@ -59,24 +59,39 @@ public static class SourceCitation
         if (project.ProjectPath.Length == 0)
             return filePath;
 
+        return Within(project, filePath) ?? Path.GetFileName(filePath);
+    }
+
+    /// <summary>
+    /// A file or folder named relative to the project, else to the solution beside it, with forward
+    /// slashes; empty for the project folder itself, and null when it is in neither.
+    /// </summary>
+    /// <remarks>
+    /// The same rule citations follow, for anything else a document names by path — a folder it tells
+    /// a reader to put code in has to read the way the files in that folder are cited.
+    /// </remarks>
+    internal static string? Within(ExtractedProject project, string path)
+    {
         // Compared as the file system reads them, not as they were typed. `C:/Apps/App.Module` from
         // a bash prompt and `C:\Apps\App.Module` from PowerShell are one directory, and comparing the
         // strings cited a file inside it as `../App.Module/...` from one shell and not the other, so
         // a committed document changed its citations with whoever regenerated it last.
         var projectPath = Normalize(project.ProjectPath);
-        var file = Normalize(filePath);
+        var target = Normalize(path);
 
-        if (Below(projectPath, file) is { } insideProject)
-            return insideProject;
+        if (target.Equals(projectPath, StringComparison.OrdinalIgnoreCase))
+            return "";
+
+        if (Below(projectPath, target) is { } insideProject)
+            return insideProject.Replace('\\', '/');
 
         // The directory holding the module usually holds the whole solution, which is where the
         // platform projects and the loose report exports live.
         var solutionRoot = Path.GetDirectoryName(projectPath);
 
-        if (solutionRoot is { Length: > 0 } && Below(solutionRoot, file) is { } insideSolution)
-            return $"../{insideSolution}";
-
-        return Path.GetFileName(filePath);
+        return solutionRoot is { Length: > 0 } && Below(solutionRoot, target) is { } insideSolution
+            ? $"../{insideSolution.Replace('\\', '/')}"
+            : null;
     }
 
     /// <summary>A path in the file system's own spelling, without a trailing separator.</summary>
@@ -101,6 +116,10 @@ public static class SourceCitation
         {
             return null;
         }
+
+        // A drive root keeps its separator through normalization, so the boundary is already there.
+        if (directory[^1] is '/' or '\\')
+            return path[directory.Length..];
 
         // A separator has to sit at the boundary, so a project at `App.Module` does not swallow a
         // sibling directory named `App.Module2`.

@@ -80,7 +80,7 @@ public class EntityAnalyzer : IEntityAnalyzer
         }
 
         // One entity per class, not per declaration -- a partial split across files is one thing.
-        entities = MergePartialDeclarations(entities, borrowed);
+        entities = MergePartialDeclarations(entities, borrowed, parents, options);
 
         foreach (var entity in entities)
         {
@@ -348,7 +348,7 @@ public class EntityAnalyzer : IEntityAnalyzer
         }
         else
         {
-            relatedEntity = typeName;
+            relatedEntity = ReferencedClassName(typeName);
             relType = RelationshipType.ManyToOne;
         }
 
@@ -393,13 +393,13 @@ public class EntityAnalyzer : IEntityAnalyzer
                         });
                     }
                 }
-                else if (entityNames.Contains(prop.TypeName))
+                else if (entityNames.Contains(ReferencedClassName(prop.TypeName)))
                 {
                     // Reference nav property -> ManyToOne
                     entity.Relationships.Add(new ExtractedRelationship
                     {
                         PropertyName = prop.Name,
-                        RelatedEntity = prop.TypeName,
+                        RelatedEntity = ReferencedClassName(prop.TypeName),
                         Type = RelationshipType.ManyToOne,
                         IsAggregated = false
                     });
@@ -810,8 +810,8 @@ public class EntityAnalyzer : IEntityAnalyzer
             if (!accepted.Contains((candidate.Namespace, candidate.Name)))
                 continue;
 
-            // Only one part of a partial class declares the base list; the parts that declare
-            // none must not erase the edge that part resolved.
+            // Only one part of a partial class names the base class; the parts that name none, or
+            // only interfaces, must not erase the edge that part resolved.
             if (ResolveBase(candidate.Declaration, candidate.Scopes, accepted) is { } parent)
                 parents.TryAdd((candidate.Namespace, candidate.Name), parent);
         }
@@ -1242,12 +1242,11 @@ public class EntityAnalyzer : IEntityAnalyzer
     /// Folds the parts of a <c>partial</c> class into the one entity they describe.
     /// </summary>
     /// <remarks>
-    /// A class matched by its base list could only ever match once, because only one part declares
-    /// the base list. A class matched by the DbSet roster matches on its name, so every part
-    /// matches -- and a scaffolded legacy schema, which is exactly what the roster is for, splits
-    /// its classes as a matter of routine. Left alone that reports the entity twice, each copy
-    /// holding half its properties: two incomplete truths, and no way for a reader to tell they
-    /// are the same class.
+    /// Acceptance is keyed on the class rather than the declaration, so every part of a partial
+    /// class is extracted, each holding what that part declares -- and a scaffolded legacy schema,
+    /// which is exactly what the DbSet roster is for, splits its classes as a matter of routine.
+    /// Left alone that reports the entity twice, each copy holding half its properties: two
+    /// incomplete truths, and no way for a reader to tell they are the same class.
     /// <para>
     /// Merging also recovers the members XPO extraction has always dropped, where a hand-written
     /// part carries <c>: BaseObject</c> and a generated part carries half the columns.
@@ -1263,10 +1262,25 @@ public class EntityAnalyzer : IEntityAnalyzer
     /// the other project's properties and then deleted the module's own class along with the
     /// borrowed file it had inherited a path from.
     /// </param>
+    /// <param name="parents">The base each accepted class was resolved to.</param>
+    /// <param name="options">Carries the root base classes.</param>
     private static List<ExtractedEntity> MergePartialDeclarations(
         List<ExtractedEntity> entities,
-        HashSet<string> borrowed)
+        HashSet<string> borrowed,
+        Dictionary<(string Namespace, string Name), (string Namespace, string Name)> parents,
+        ExtractionOptions options)
     {
+        // C# puts the base class first in a base list, so a part names one when its first entry is
+        // a class known to be one: the base this class was resolved to, a root base, or a class the
+        // business class library ships. Syntax cannot tell a class from an interface on its own, so a
+        // first entry nobody can vouch for proves nothing either way.
+        bool NamesTheBaseClass(ExtractedEntity part) =>
+            part.BaseTypes.FirstOrDefault() is { } first
+            && (options.BaseTypeNames.Contains(first, StringComparer.Ordinal)
+                || LibraryBaseTypeNames.Contains(first)
+                || (parents.TryGetValue((part.Namespace, part.ClassName), out var parent)
+                    && parent.Name.Equals(first, StringComparison.Ordinal)));
+
         var parts = new Dictionary<(bool Borrowed, string Namespace, string ClassName), List<ExtractedEntity>>();
         var order = new List<(bool Borrowed, string Namespace, string ClassName)>();
 
@@ -1287,10 +1301,14 @@ public class EntityAnalyzer : IEntityAnalyzer
         {
             var group = parts[key];
 
-            // The part declaring the base list is the hand-written one, and it is where the class
-            // attributes live. Taking whichever half came first instead would make the reported
-            // file, and the order of the columns, depend on the file system doing the listing.
-            var primary = group.Find(part => part.BaseTypes.Count > 0) ?? group[0];
+            // The part naming the base class is the hand-written one, and usually where the class
+            // attributes live; what the other parts declare is merged into it below. Taking whichever half came first instead would make the reported
+            // file, and the order of the columns, depend on the file system doing the listing. Any
+            // base list is not enough: a part that only adds an interface -- a layout, an
+            // `IXafEntityObject` -- declares one too, and sorts first as often as not.
+            var primary = group.Find(NamesTheBaseClass)
+                          ?? group.Find(part => part.BaseTypes.Count > 0)
+                          ?? group[0];
             merged.Add(primary);
 
             foreach (var entity in group)
@@ -1942,6 +1960,13 @@ public class EntityAnalyzer : IEntityAnalyzer
         return normalized.Equals(shortName, StringComparison.Ordinal)
                || normalized.EndsWith($".{shortName}");
     }
+
+    /// <summary>
+    /// The class a reference is to, without the nullable annotation: <c>Student?</c> is a
+    /// <c>Student</c> that may be empty, not a different type. Trimmed again after, because
+    /// <c>Student ?</c> is valid C# and the type is kept as written.
+    /// </summary>
+    private static string ReferencedClassName(string typeName) => typeName.Trim().TrimEnd('?').TrimEnd();
 
     private static string ExtractGenericArgument(string typeName)
     {
